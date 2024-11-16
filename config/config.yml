@@ -1,0 +1,15 @@
+credentials:
+  login: "Super Allex"
+  password: "..."
+
+features:
+  maze: true
+  daily_tasks: true
+  profile_upgrade: true
+
+delays:
+  min: 1.5
+  max: 3.5
+  page_load:
+    min: 0.3
+    max: 1.2
