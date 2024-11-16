@@ -1,94 +1,65 @@
-import yaml
+from src.modules.auth import Auth
 import logging
-from modules.auth import Auth
-from modules.maze import MazeBot
-from modules.daily import DailyTasks
-from modules.profile import ProfileManager
-from utils.human_like import HumanBehavior
+import sys
 
 class NeboBot:
-    def __init__(self, config_path):
+    """
+    Main bot class for Nebo.mobi game.
+    Currently handles authentication, with more features to come.
+    """
+    
+    def __init__(self, config_path: str):
         """
-        Инициализация бота
-        
+        Initialize bot instance.
+
         Args:
-            config_path (str): Путь к файлу конфигурации
+            config_path: Path to configuration file
         """
-        self.config = self._load_config(config_path)
-        self.session = None
-        self.human = HumanBehavior(
-            min_delay=self.config['delays']['min'],
-            max_delay=self.config['delays']['max']
-        )
+        self._setup_logger()
+        self.logger = logging.getLogger(__name__)
         
-        # Инициализация модулей
-        self.auth = Auth(
-            self.config['credentials']['login'],
-            self.config['credentials']['password']
-        )
-        
-        # Модули будут инициализированы после авторизации
-        self.maze_bot = None
-        self.daily_tasks = None
-        self.profile = None
-        
-        # Настройка логирования
+        try:
+            self.auth = Auth(config_path)
+            self.logger.info("Bot initialized successfully")
+        except Exception as e:
+            self.logger.error(f"Initialization failed: {e}")
+            sys.exit(1)
+
+    def _setup_logger(self):
+        """
+        Configure logging settings
+        """
         logging.basicConfig(
             level=logging.INFO,
-            format='%(asctime)s - %(name)s - %(levelname)s - %(message)s'
+            format='%(asctime)s - %(name)s - %(levelname)s - %(message)s',
+            handlers=[
+                logging.StreamHandler(sys.stdout)
+            ]
         )
-        self.logger = logging.getLogger('NeboBot')
-
-    def _load_config(self, config_path):
-        """Загрузка конфигурации из YAML файла"""
-        with open(config_path, 'r') as f:
-            return yaml.safe_load(f)
 
     def start(self):
-        """Запуск бота"""
-        try:
-            # Авторизация
-            self.session = self.auth.login()
-            self.logger.info("Успешная авторизация")
+        """
+        Start bot operation.
+        
+        Returns:
+            bool: True if login successful, False otherwise
+        """
+        self.logger.info("Starting bot operation")
+        
+        if not self.auth.login():
+            self.logger.error("Authentication failed")
+            return False
             
-            # Инициализация модулей с активной сессией
-            if self.config['features']['maze']:
-                self.maze_bot = MazeBot(self.session, self.human)
-            
-            if self.config['features']['daily_tasks']:
-                self.daily_tasks = DailyTasks(self.session, self.human)
-            
-            if self.config['features']['profile_upgrade']:
-                self.profile = ProfileManager(self.session, self.human)
-            
-            # Основной цикл работы
-            while True:
-                self._process_daily_routine()
-                self.human.sleep_random()  # Случайная пауза между циклами
-                
-        except Exception as e:
-            self.logger.error(f"Ошибка в работе бота: {e}")
-            raise
+        self.logger.info("Successfully authenticated")
+        return True
 
-    def _process_daily_routine(self):
-        """Выполнение ежедневных задач"""
-        try:
-            # Проверка и выполнение ежедневных заданий
-            if self.daily_tasks:
-                self.daily_tasks.process_tasks()
-            
-            # Прохождение лабиринта
-            if self.maze_bot:
-                self.maze_bot.solve_maze()
-            
-            # Управление профилем
-            if self.profile:
-                self.profile.check_and_upgrade()
-                
-        except Exception as e:
-            self.logger.error(f"Ошибка в ежедневной рутине: {e}")
-            # Продолжаем работу, несмотря на ошибки в отдельных модулях
-
-if __name__ == "__main__":
-    bot = NeboBot('config/config.yml')
-    bot.start()
+    def stop(self):
+        """
+        Stop bot operation and cleanup
+        """
+        self.logger.info("Stopping bot operation")
+        
+        if self.auth.logout():
+            self.logger.info("Successfully logged out")
+        else:
+            self.logger.warning("Logout failed")

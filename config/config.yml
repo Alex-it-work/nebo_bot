@@ -1,15 +1,15 @@
-credentials:
-  login: "Super Allex"
-  password: "..."
+# Учетные данные
+username: "Super Allex"
+password: "..."
 
-features:
-  maze: true
-  daily_tasks: true
-  profile_upgrade: true
+# Настройки бота
+base_url: "https://nebo.mobi"
+timeout: 30
 
-delays:
-  min: 1.5
-  max: 3.5
-  page_load:
-    min: 0.3
-    max: 1.2
+# Настройки имитации человека
+delay_min: 1
+delay_max: 3
+
+# Настройки логирования
+log_level: "INFO"
+log_file: "nebo_bot.log"
