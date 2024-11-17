@@ -135,36 +135,6 @@ class Auth:
             self.logger.error(f"Login request failed: {e}")
             return False
 
-    def logout(self):
-        """
-        Logout user from the system.
-        Clears session cookies after successful logout.
-
-        Returns:
-            bool: True if logout successful, False otherwise
-        """
-        try:
-            time.sleep(self.human.human_delay())
-            
-            response = self.session.get(
-                f"{self.base_url}/logout",
-                timeout=self.timeout
-            )
-            
-            # Check if login cookie was removed or expired
-            login_cookie = self.session.cookies.get('login')
-            if response.status_code == 200 and (not login_cookie or login_cookie == ""):
-                self.logger.info("Successfully logged out")
-                self.session.cookies.clear()
-                return True
-            else:
-                self.logger.error("Logout failed")
-                return False
-                
-        except requests.RequestException as e:
-            self.logger.error(f"Logout request failed: {e}")
-            return False
-
     def is_authenticated(self):
         """
         Check if current session is authenticated by verifying required cookies.
@@ -173,20 +143,102 @@ class Auth:
             bool: True if user is authenticated, False otherwise
         """
         try:
-            # Check if all required cookies are present
+            # Проверяем наличие всех необходимых кук
             cookies = self.session.cookies
             required_cookies = ['JSESSIONID', 'id', 'login']
             
             if not all(cookie in cookies for cookie in required_cookies):
                 return False
                 
-            # Additional check by requesting profile page
+            # Проверяем доступ к домашней странице
             response = self.session.get(
-                f"{self.base_url}/profile",
+                f"{self.base_url}/home",
+                timeout=self.timeout,
+                # Важно! Не следовать редиректам автоматически
+                allow_redirects=False
+            )
+            
+            # Если нас не редиректит на логин и есть все куки - мы авторизованы
+            return response.status_code in [200, 302] and 'login' not in response.url
+                
+        except Exception as e:
+            self.logger.error(f"Authentication check failed: {e}")
+            return False
+
+    def get_logout_interface(self):
+        """
+        Get current wicket interface for logout link from the page.
+        
+        Returns:
+            str: Wicket interface string or None if not found
+        """
+        try:
+            # Получаем домашнюю страницу
+            response = self.session.get(
+                f"{self.base_url}/home",
                 timeout=self.timeout
             )
             
-            return response.status_code == 200 and 'login' not in response.url
+            soup = BeautifulSoup(response.text, 'html.parser')
+            # Ищем ссылку логаута по тексту "Выход"
+            logout_link = soup.find('a', text='Выход')
             
-        except:
+            if not logout_link:
+                self.logger.error("Logout link not found")
+                return None
+                
+            # Получаем href атрибут и извлекаем wicket:interface
+            href = logout_link.get('href', '')
+            if 'wicket:interface=' in href:
+                return href.split('wicket:interface=')[-1]
+            
+            return None
+            
+        except Exception as e:
+            self.logger.error(f"Failed to get logout interface: {e}")
+            return None
+
+    def logout(self):
+        """
+        Logout user from the system using current wicket interface.
+
+        Returns:
+            bool: True if logout successful, False otherwise
+        """
+        try:
+            time.sleep(self.human.human_delay())
+            
+            # Получаем актуальный wicket:interface
+            wicket_interface = self.get_logout_interface()
+            if not wicket_interface:
+                return False
+            
+            # Делаем GET запрос с актуальным интерфейсом
+            params = {
+                'wicket:interface': wicket_interface
+            }
+            
+            response = self.session.get(
+                f"{self.base_url}/doors",
+                params=params,
+                timeout=self.timeout,
+                allow_redirects=True
+            )
+
+            # Проверяем результат после всех редиректов
+            is_success = (
+                response.status_code == 200 and
+                'welcome' in response.url
+                
+            )
+            
+            if is_success:
+                self.logger.info("Successfully logged out")
+                return True
+            else:
+                self.logger.error(f"Logout failed. Final URL: {response.url}, Status: {response.status_code}")
+                return False
+                    
+        except requests.RequestException as e:
+            self.logger.error(f"Logout request failed: {e}")
             return False
