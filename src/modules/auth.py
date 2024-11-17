@@ -3,6 +3,7 @@ import logging
 from ..utils.human_like import HumanBehavior
 import yaml
 import time
+from bs4 import BeautifulSoup
 
 class Auth:
     """
@@ -43,6 +44,45 @@ class Auth:
             self.logger.error(f"Failed to load configuration: {e}")
             raise
 
+    def get_form_params(self):
+        """
+        Get login form parameters including Wicket interface and hidden fields.
+        Uses direct form search without relying on specific IDs.
+
+        Returns:
+            tuple: (wicket_interface, hidden_field) or (None, None) if parsing fails
+        """
+        try:
+            response = self.session.get(
+                f"{self.base_url}/login",
+                timeout=self.timeout
+            )
+            
+            soup = BeautifulSoup(response.text, 'html.parser')
+            # Ищем форму по её методу и наличию loginForm в action
+            form = soup.find('form', attrs={
+                'method': 'post',
+                'action': lambda x: x and 'loginForm' in x
+            })
+            
+            if not form:
+                self.logger.error("Login form not found")
+                return None, None
+                
+            # Получаем wicket:interface из action формы
+            action = form.get('action', '')
+            wicket_interface = action.split('wicket:interface=')[-1]
+            
+            # Ищем hidden input внутри этой формы
+            hidden_input = form.find('input', {'type': 'hidden'})
+            hidden_field_name = hidden_input.get('name') if hidden_input else None
+
+            return wicket_interface, hidden_field_name
+            
+        except Exception as e:
+            self.logger.error(f"Failed to get form parameters: {e}")
+            return None, None
+
     def login(self):
         """
         Authenticate user in the system.
@@ -54,23 +94,23 @@ class Auth:
         try:
             time.sleep(self.human.human_delay())
             
+            # Get form parameters
+            wicket_interface, hidden_field_name = self.get_form_params()
+            if not wicket_interface:
+                return False
+            
             payload = {
-                'username': self.username,
+                f'wicket:interface': wicket_interface,  # Используем полученный интерфейс
+                hidden_field_name : '',
+                'login': self.username,
                 'password': self.password,
-                'action': 'login'
             }
             
             headers = {
                 'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36',
-                'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,image/webp,*/*;q=0.8'
+                'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,image/webp,*/*;q=0.8',
+                'Content-Type': 'application/x-www-form-urlencoded'
             }
-            
-            # Initial request to get cookies and tokens
-            response = self.session.get(
-                f"{self.base_url}/login",
-                headers=headers,
-                timeout=self.timeout
-            )
             
             # Simulate page reading delay
             time.sleep(self.human.simulate_page_load())
@@ -83,7 +123,8 @@ class Auth:
                 timeout=self.timeout
             )
             
-            if login_response.status_code == 200 and 'welcome' in login_response.text.lower():
+            # Check if login cookie is present in response cookies
+            if login_response.status_code == 200 and 'login' in self.session.cookies:
                 self.logger.info("Successfully authenticated")
                 return True
             else:
@@ -110,7 +151,9 @@ class Auth:
                 timeout=self.timeout
             )
             
-            if response.status_code == 200:
+            # Check if login cookie was removed or expired
+            login_cookie = self.session.cookies.get('login')
+            if response.status_code == 200 and (not login_cookie or login_cookie == ""):
                 self.logger.info("Successfully logged out")
                 self.session.cookies.clear()
                 return True
@@ -124,16 +167,26 @@ class Auth:
 
     def is_authenticated(self):
         """
-        Check if current session is authenticated.
+        Check if current session is authenticated by verifying required cookies.
 
         Returns:
             bool: True if user is authenticated, False otherwise
         """
         try:
+            # Check if all required cookies are present
+            cookies = self.session.cookies
+            required_cookies = ['JSESSIONID', 'id', 'login']
+            
+            if not all(cookie in cookies for cookie in required_cookies):
+                return False
+                
+            # Additional check by requesting profile page
             response = self.session.get(
                 f"{self.base_url}/profile",
                 timeout=self.timeout
             )
+            
             return response.status_code == 200 and 'login' not in response.url
+            
         except:
             return False
