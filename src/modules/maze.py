@@ -4,17 +4,16 @@ import random
 import time
 
 class MazeBot:
-    def __init__(self, session, human):
+    def __init__(self, auth_instance):
         """
         Инициализация бота для прохождения лабиринта
         
         Args:
-            session: Активная сессия с авторизацией
-            human: Экземпляр класса HumanBehavior для имитации человеческого поведения
+            auth_instance: Экземпляр класса Auth с готовой сессией
         """
-        self.session = session
-        self.human = human
-        self.base_url = "https://nebo.mobi/doors"
+        self.session = auth_instance.session
+        self.human = auth_instance.human
+        self.base_url = auth_instance.base_url  # И базовый URL возьмём оттуда же
         
     def get_current_level(self, html):
         """Extract current level from page HTML"""
@@ -29,15 +28,37 @@ class MazeBot:
         return notify is not None and "тупик" in notify.text
         
     def get_door_links(self, html):
-        """Extract door links from page HTML"""
+        """Extract door links and their wicket interfaces from page HTML"""
         soup = BeautifulSoup(html, 'html.parser')
-        links = []
-        for i in range(1, 4):
-            link = soup.find('a', id=f'doorLink{i}')
-            if link and 'href' in link.attrs:
-                links.append(link['href'])
-        return links
-
+        doors = []
+        
+        # Ищем все ссылки с wicket:interface для дверей
+        door_links = soup.find_all('a', href=lambda x: x and 'wicket:interface' in x and 'doorLink' in x)
+        
+        for link in door_links:
+            # Вытаскиваем wicket:interface из href
+            wicket_interface = link['href'].split('wicket:interface=')[-1]
+            doors.append(wicket_interface)
+        
+        return doors
+    
+    def wait_for_page_load(self, response):
+        """
+        Проверяем что страница обновилась после действия
+        """
+        html = response.text
+        
+        # Если попали в тупик - страница обновилась
+        if self.is_dead_end(html):
+            return True
+            
+        # Если изменился уровень - страница обновилась    
+        current_level = self.get_current_level(html)
+        if current_level > 0:  # Любой положительный уровень означает что страница загрузилась
+            return True
+            
+        return False
+    
     def solve_maze(self):
         """Main logic for solving the maze"""
         attempts = 0
