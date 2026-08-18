@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import logging
 from dataclasses import dataclass
+from datetime import datetime, time
 from pathlib import Path
 from typing import Any
 
@@ -20,20 +21,30 @@ class ConfigError(Exception):
 class Delays:
     """Timing envelope used to space out requests.
 
+    ``min_seconds`` and ``max_seconds`` describe where most pauses land, not
+    hard limits: pauses are drawn from a log-normal curve so a few run longer,
+    the way a person's do. Occasionally a much longer break is inserted.
+
     Attributes:
-        min_seconds: Lower bound of the pause between actions.
-        max_seconds: Upper bound of the pause between actions.
+        min_seconds: Roughly the 10th percentile of the pause between actions.
+        max_seconds: Roughly the 90th percentile of the pause between actions.
         page_load_min: Lower bound of the simulated page reading pause.
         page_load_max: Upper bound of the simulated page reading pause.
+        long_pause_chance: Probability that an action is preceded by a break.
+        long_pause_min: Shortest such break.
+        long_pause_max: Longest such break.
     """
 
     min_seconds: float = 1.5
     max_seconds: float = 3.5
     page_load_min: float = 0.3
     page_load_max: float = 1.2
+    long_pause_chance: float = 0.04
+    long_pause_min: float = 20.0
+    long_pause_max: float = 120.0
 
     def __post_init__(self) -> None:
-        if self.min_seconds < 0 or self.page_load_min < 0:
+        if self.min_seconds < 0 or self.page_load_min < 0 or self.long_pause_min < 0:
             raise ConfigError("Delays cannot be negative")
         if self.min_seconds > self.max_seconds:
             raise ConfigError(
@@ -43,6 +54,15 @@ class Delays:
             raise ConfigError(
                 f"page_load_min ({self.page_load_min}) must not exceed "
                 f"page_load_max ({self.page_load_max})"
+            )
+        if self.long_pause_min > self.long_pause_max:
+            raise ConfigError(
+                f"long_pause_min ({self.long_pause_min}) must not exceed "
+                f"long_pause_max ({self.long_pause_max})"
+            )
+        if not 0.0 <= self.long_pause_chance <= 1.0:
+            raise ConfigError(
+                f"long_pause_chance must be between 0 and 1, got {self.long_pause_chance}"
             )
 
 
@@ -62,6 +82,11 @@ class Config:
         maze_max_attempts: Maximum maze runs before giving up, 0 for unlimited.
         maze_memory_file: Where door knowledge is stored between runs, or None
             to keep it in memory only.
+        session_max_minutes: How long one run may play before stopping, 0 for
+            no limit. A session that never ends is the least human thing a bot
+            can do.
+        active_hours: Window during which the bot may play, as
+            ``(start, end)``, or None to allow any time. May span midnight.
     """
 
     username: str
@@ -74,6 +99,8 @@ class Config:
     maze_target_level: int = 10
     maze_max_attempts: int = 0
     maze_memory_file: str | None = "data/maze_memory.json"
+    session_max_minutes: int = 0
+    active_hours: tuple[time, time] | None = None
 
     @property
     def numeric_log_level(self) -> int:
@@ -146,6 +173,9 @@ def _from_mapping(raw: dict[str, Any], path: Path) -> Config:
         max_seconds=_number(raw, "delay_max", 3.5),
         page_load_min=_number(raw, "page_load_min", 0.3),
         page_load_max=_number(raw, "page_load_max", 1.2),
+        long_pause_chance=_number(raw, "long_pause_chance", 0.04),
+        long_pause_min=_number(raw, "long_pause_min", 20.0),
+        long_pause_max=_number(raw, "long_pause_max", 120.0),
     )
 
     return Config(
@@ -159,7 +189,37 @@ def _from_mapping(raw: dict[str, Any], path: Path) -> Config:
         maze_target_level=int(_number(raw, "maze_target_level", 10)),
         maze_max_attempts=int(_number(raw, "maze_max_attempts", 0)),
         maze_memory_file=memory_file or None,
+        session_max_minutes=int(_number(raw, "session_max_minutes", 0)),
+        active_hours=_active_hours(raw.get("active_hours")),
     )
+
+
+def _active_hours(value: Any) -> tuple[time, time] | None:
+    """Parse an ``"HH:MM-HH:MM"`` activity window.
+
+    Returns:
+        The start and end of the window, or None when unset.
+
+    Raises:
+        ConfigError: If the value is not a well-formed window.
+    """
+    if value is None or value == "":
+        return None
+    if not isinstance(value, str):
+        raise ConfigError(f"'active_hours' must be a string like \"09:00-23:30\", got {value!r}")
+
+    parts = value.split("-")
+    if len(parts) != 2:
+        raise ConfigError(f"'active_hours' must look like \"09:00-23:30\", got {value!r}")
+
+    try:
+        start, end = (datetime.strptime(part.strip(), "%H:%M").time() for part in parts)
+    except ValueError as exc:
+        raise ConfigError(f"Could not read 'active_hours' {value!r}: {exc}") from exc
+
+    if start == end:
+        raise ConfigError("'active_hours' start and end must differ")
+    return start, end
 
 
 def _number(raw: dict[str, Any], key: str, default: float) -> float:

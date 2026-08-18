@@ -29,6 +29,7 @@ from .. import wicket
 from ..config import Config
 from ..memory import DoorMemory
 from ..modules.auth import Auth
+from ..utils.human_like import SessionBudget
 
 logger = logging.getLogger(__name__)
 
@@ -139,8 +140,18 @@ class MazeBot:
 
         logger.info("Solving the maze, target level %d", target)
 
+        budget = SessionBudget(self.config.session_max_minutes)
+
         try:
             while max_attempts == 0 or attempt < max_attempts:
+                if budget.expired():
+                    logger.info(
+                        "Session limit of %d min reached after %d attempts; stopping",
+                        budget.max_minutes,
+                        attempt,
+                    )
+                    return False
+
                 attempt += 1
                 logger.info("Maze attempt #%d", attempt)
 

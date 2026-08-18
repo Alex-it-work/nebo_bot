@@ -9,6 +9,7 @@ from . import config as config_module
 from .config import Config
 from .modules.auth import Auth
 from .modules.maze import MazeBot
+from .utils.human_like import within_active_hours
 
 logger = logging.getLogger(__name__)
 
@@ -53,6 +54,15 @@ class NeboBot:
         Returns:
             True if every feature that ran succeeded.
         """
+        if not within_active_hours(self.config.active_hours):
+            start, end = self.config.active_hours  # type: ignore[misc]
+            logger.info(
+                "Outside the configured active hours (%s-%s); nothing to do",
+                start.strftime("%H:%M"),
+                end.strftime("%H:%M"),
+            )
+            return True
+
         if not self.auth.is_authenticated():
             logger.error("Cannot run features without an authenticated session")
             return False

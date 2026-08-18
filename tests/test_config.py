@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import logging
+from datetime import time
 
 import pytest
 import yaml
@@ -95,6 +96,46 @@ class TestLoad:
             config_module.load(write_config(tmp_path, {**VALID, "delay_min": "fast"}))
 
 
+class TestActiveHours:
+    def test_absent_means_no_restriction(self, tmp_path):
+        assert config_module.load(write_config(tmp_path, VALID)).active_hours is None
+
+    def test_parses_a_window(self, tmp_path):
+        config = config_module.load(
+            write_config(tmp_path, {**VALID, "active_hours": "09:00-23:30"})
+        )
+        assert config.active_hours == (time(9, 0), time(23, 30))
+
+    def test_accepts_a_window_spanning_midnight(self, tmp_path):
+        config = config_module.load(
+            write_config(tmp_path, {**VALID, "active_hours": "22:00-02:00"})
+        )
+        assert config.active_hours == (time(22, 0), time(2, 0))
+
+    def test_empty_string_means_no_restriction(self, tmp_path):
+        assert config_module.load(
+            write_config(tmp_path, {**VALID, "active_hours": ""})
+        ).active_hours is None
+
+    @pytest.mark.parametrize("value", ["09:00", "9-23", "09:00-", "25:00-26:00", "09:00-10:00-11:00"])
+    def test_rejects_malformed_windows(self, tmp_path, value):
+        with pytest.raises(ConfigError, match="active_hours"):
+            config_module.load(write_config(tmp_path, {**VALID, "active_hours": value}))
+
+    def test_rejects_an_empty_window(self, tmp_path):
+        with pytest.raises(ConfigError, match="differ"):
+            config_module.load(write_config(tmp_path, {**VALID, "active_hours": "09:00-09:00"}))
+
+
+class TestSessionLimit:
+    def test_defaults_to_unlimited(self, tmp_path):
+        assert config_module.load(write_config(tmp_path, VALID)).session_max_minutes == 0
+
+    def test_reads_the_limit(self, tmp_path):
+        config = config_module.load(write_config(tmp_path, {**VALID, "session_max_minutes": 25}))
+        assert config.session_max_minutes == 25
+
+
 class TestDelays:
     def test_rejects_an_inverted_range(self):
         with pytest.raises(ConfigError, match="delay_min"):
@@ -107,6 +148,26 @@ class TestDelays:
     def test_rejects_negative_values(self):
         with pytest.raises(ConfigError, match="negative"):
             Delays(min_seconds=-1)
+
+    def test_rejects_an_inverted_long_pause_range(self):
+        with pytest.raises(ConfigError, match="long_pause_min"):
+            Delays(long_pause_min=200, long_pause_max=10)
+
+    @pytest.mark.parametrize("chance", [-0.1, 1.5])
+    def test_rejects_an_impossible_probability(self, chance):
+        with pytest.raises(ConfigError, match="long_pause_chance"):
+            Delays(long_pause_chance=chance)
+
+    def test_reads_the_long_pause_settings(self, tmp_path):
+        config = config_module.load(
+            write_config(
+                tmp_path,
+                {**VALID, "long_pause_chance": 0.2, "long_pause_min": 10, "long_pause_max": 40},
+            )
+        )
+        assert config.delays.long_pause_chance == 0.2
+        assert config.delays.long_pause_min == 10
+        assert config.delays.long_pause_max == 40
 
 
 class TestUrl:
