@@ -1,0 +1,30 @@
+# Скопируйте этот файл в config/config.yml и укажите свои данные.
+# config/config.yml в .gitignore и в репозиторий не попадает.
+
+# Учетные данные
+username: "Имя в игре"
+password: "ваш пароль"
+
+# Настройки подключения
+base_url: "https://nebo.mobi"
+timeout: 30
+
+# Паузы между действиями, в секундах
+delay_min: 1.5
+delay_max: 3.5
+
+# Пауза на "чтение" загруженной страницы, в секундах
+page_load_min: 0.3
+page_load_max: 1.2
+
+# Лабиринт
+maze_target_level: 10
+maze_max_attempts: 0 # 0 — без ограничения
+
+# Накопленная статистика по дверям. Чем дольше бот играет, тем лучше выбирает.
+# Оставьте пустым, чтобы не сохранять между запусками.
+maze_memory_file: "data/maze_memory.json"
+
+# Логирование
+log_level: "INFO" # DEBUG, INFO, WARNING, ERROR, CRITICAL
+log_file: "logs/nebo_bot.log" # оставьте пустым, чтобы писать только в консоль

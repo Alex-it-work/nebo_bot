@@ -1,54 +1,60 @@
+"""Timing helpers that keep the bot's request pattern irregular."""
+
+from __future__ import annotations
+
 import random
+import time
+
+from ..config import Delays
+
+# How often a pause is stretched into a longer "distraction".
+_LONG_PAUSE_CHANCE = 0.1
+_LONG_PAUSE_RANGE = (2.0, 4.0)
+_MICRO_VARIATION = 0.3
+
 
 class HumanBehavior:
+    """Generates varied delays instead of a fixed request cadence.
+
+    Bounds come from the configuration, so pacing can be tuned without touching
+    the code.
     """
-    A class that simulates human-like behavior in automated interactions.
-    
-    This class provides methods to generate realistic delays and timing variations
-    that mimic human behavior when interacting with applications or websites.
-    It helps make automated actions appear more natural by avoiding constant
-    or predictable timing patterns.
-    
-    Attributes:
-        min_delay (float): Minimum delay between actions in seconds
-        max_delay (float): Maximum delay between actions in seconds
-    """
-    
-    def __init__(self, min_delay=1.5, max_delay=3.5):
-        """
-        Initialize human behavior parameters
-        
+
+    def __init__(self, delays: Delays | None = None):
+        """Initialise with a timing envelope.
+
         Args:
-            min_delay (float): Minimum delay between actions in seconds
-            max_delay (float): Maximum delay between actions in seconds
+            delays: Timing bounds. Defaults are used when omitted.
         """
-        self.min_delay = min_delay
-        self.max_delay = max_delay
-        
-    def human_delay(self):
+        self.delays = delays or Delays()
+
+    def delay(self) -> float:
+        """Return a randomised pause between actions, in seconds.
+
+        Combines a uniform base with an occasional longer pause and a small
+        jitter, so the intervals do not cluster around a single value.
         """
-        Simulate human-like delay between actions
-        
-        Returns:
-            float: A randomized delay in seconds that mimics human behavior
+        base = random.uniform(self.delays.min_seconds, self.delays.max_seconds)
+
+        if random.random() < _LONG_PAUSE_CHANCE:
+            base += random.uniform(*_LONG_PAUSE_RANGE)
+
+        jittered = base + random.uniform(-_MICRO_VARIATION, _MICRO_VARIATION)
+        return max(0.0, jittered)
+
+    def page_load_delay(self) -> float:
+        """Return a randomised page-reading pause, in seconds."""
+        return random.uniform(self.delays.page_load_min, self.delays.page_load_max)
+
+    def pause(self, multiplier: float = 1.0) -> None:
+        """Sleep for :meth:`delay` seconds.
+
+        Args:
+            multiplier: Scales the pause; use a value above 1 after a setback,
+                where a person would naturally hesitate longer.
         """
-        # Base delay
-        base_delay = random.uniform(self.min_delay, self.max_delay)
-        
-        # Occasionally add a longer pause
-        if random.random() < 0.1:
-            base_delay += random.uniform(2, 4)
-            
-        # Add micro-variations
-        micro_variation = random.uniform(-0.3, 0.3)
-        
-        return base_delay + micro_variation
-    
-    def simulate_page_load(self):
-        """
-        Simulate realistic page load waiting time
-        
-        Returns:
-            float: A randomized page load time in seconds
-        """
-        return random.uniform(0.3, 1.2)
+        time.sleep(self.delay() * multiplier)
+
+    def pause_page_load(self) -> None:
+        """Sleep for :meth:`page_load_delay` seconds."""
+        time.sleep(self.page_load_delay())

@@ -1,65 +1,72 @@
-from src.modules.auth import Auth
+"""Top-level orchestration of the bot's features."""
+
+from __future__ import annotations
+
 import logging
-import sys
+from pathlib import Path
+
+from . import config as config_module
+from .config import Config
+from .modules.auth import Auth
+from .modules.maze import MazeBot
+
+logger = logging.getLogger(__name__)
+
 
 class NeboBot:
+    """Runs the enabled features against an authenticated session.
+
+    Example:
+        bot = NeboBot('config/config.yml')
+        if bot.start():
+            bot.run()
+        bot.stop()
     """
-    Main bot class for Nebo.mobi game.
-    Currently handles authentication, with more features to come.
-    """
-    
-    def __init__(self, config_path: str):
-        """
-        Initialize bot instance.
+
+    def __init__(self, config_path: str | Path = "config/config.yml"):
+        """Load the configuration and prepare the modules.
 
         Args:
-            config_path: Path to configuration file
-        """
-        self._setup_logger()
-        self.logger = logging.getLogger(__name__)
-        
-        try:
-            self.auth = Auth(config_path)
-            self.logger.info("Bot initialized successfully")
-        except Exception as e:
-            self.logger.error(f"Initialization failed: {e}")
-            sys.exit(1)
+            config_path: Path to the YAML configuration file.
 
-    def _setup_logger(self):
+        Raises:
+            ConfigError: If the configuration is missing or invalid. Raised
+                rather than exiting, so callers decide how to handle it.
         """
-        Configure logging settings
-        """
-        logging.basicConfig(
-            level=logging.INFO,
-            format='%(asctime)s - %(name)s - %(levelname)s - %(message)s',
-            handlers=[
-                logging.StreamHandler(sys.stdout)
-            ]
-        )
+        self.config: Config = config_module.load(config_path)
+        self.auth = Auth(self.config)
+        self.maze = MazeBot(self.auth, self.config)
+        logger.debug("Bot initialised for %s", self.config.base_url)
 
-    def start(self):
-        """
-        Start bot operation.
-        
+    def start(self) -> bool:
+        """Authenticate.
+
         Returns:
-            bool: True if login successful, False otherwise
+            True if the session is ready for use.
         """
-        self.logger.info("Starting bot operation")
-        
-        if not self.auth.login():
-            self.logger.error("Authentication failed")
-            return False
-            
-        self.logger.info("Successfully authenticated")
-        return True
+        logger.info("Starting bot")
+        return self.auth.login()
 
-    def stop(self):
+    def run(self) -> bool:
+        """Run the enabled features once.
+
+        Returns:
+            True if every feature that ran succeeded.
         """
-        Stop bot operation and cleanup
+        if not self.auth.is_authenticated():
+            logger.error("Cannot run features without an authenticated session")
+            return False
+
+        return self.maze.solve()
+
+    def stop(self) -> None:
+        """Log out and release the session.
+
+        Safe to call even if :meth:`start` failed or was never called.
         """
-        self.logger.info("Stopping bot operation")
-        
-        if self.auth.logout():
-            self.logger.info("Successfully logged out")
-        else:
-            self.logger.warning("Logout failed")
+        logger.info("Stopping bot")
+
+        if not self.auth.logout():
+            logger.warning("Logout did not complete cleanly")
+
+        self.auth.session.close()
