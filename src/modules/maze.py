@@ -12,14 +12,21 @@ so the remaining count is checked before opening anything.
 All selectors here have been confirmed against live runs, dead-end banner
 included.
 
-Doors are chosen from accumulated experience rather than at random: uniform
-random cannot realistically clear ten rooms (about one run in 19,700), while
-probing showed the layout is largely stable. See :mod:`src.memory`.
+Doors are chosen at random, and measurement says nothing better is available.
+Over 40 attempts every door in rooms 2 to 9 turned up as both a wall and a
+passage, so the layout is reshuffled on each attempt and no door can be
+learned. The first room always opens (39 of 39) and so does the last, while
+the rooms between pass roughly 55-75% of the time: about one run in 44
+reaches the prize, at some 150 keys apiece.
+
+The page does reveal each room's layout once it is behind you, but by then it
+has already been reshuffled, so that knowledge cannot inform a choice either.
 """
 
 from __future__ import annotations
 
 import logging
+import random
 import re
 
 import requests
@@ -27,7 +34,6 @@ from bs4 import BeautifulSoup
 
 from .. import wicket
 from ..config import Config
-from ..memory import DoorMemory
 from ..modules.auth import Auth
 from ..utils.human_like import SessionBudget
 
@@ -48,10 +54,6 @@ _STEP_BUDGET_FACTOR = 3
 # its text: "Поздравляем! Вы прошли лабиринт!".
 _VICTORY_PATTERN = re.compile(r"прошли\s+лабиринт", re.I)
 
-# Images used on the revealed layout of a room already left behind.
-_WALL_IMAGE = "door_wall"
-_PASSAGE_IMAGE = "door_go"
-
 # "Осталось ключей: 1707" — the number may carry thousand separators.
 _KEYS_PATTERN = re.compile(r"Осталось\s+ключей:\s*(\d[\d'’ ]*)")
 
@@ -63,19 +65,16 @@ class OutOfKeys(Exception):
 class MazeBot:
     """Walks the maze until the target depth is reached."""
 
-    def __init__(self, auth: Auth, config: Config, memory: DoorMemory | None = None):
+    def __init__(self, auth: Auth, config: Config):
         """Initialise with an authenticated session.
 
         Args:
             auth: Auth instance owning the logged-in session.
             config: Validated bot configuration.
-            memory: Door knowledge to consult and extend. Loaded from the
-                configured file when omitted.
         """
         self.session = auth.session
         self.human = auth.human
         self.config = config
-        self.memory = memory if memory is not None else DoorMemory(config.maze_memory_file)
 
     def keys_left(self, soup: BeautifulSoup) -> int | None:
         """Read how many keys remain.
@@ -128,58 +127,6 @@ class MazeBot:
             if amount.get_text(strip=True)
         ][:2]
 
-    def revealed_layouts(self, soup: BeautifulSoup) -> dict[int, dict[int, bool]]:
-        """Read the layouts the page reveals for rooms already left behind.
-
-        After moving on, the game shows what was behind each door of the
-        previous room: ``door_wall`` for a dead end, ``door_go`` for a passage.
-        That is free, exact information about doors never opened, and it shows
-        rooms can hold more than one passage.
-
-        Returns:
-            Room number mapped to door number mapped to "is a passage".
-        """
-        layouts: dict[int, dict[int, bool]] = {}
-
-        for block in soup.find_all("div", class_="m5"):
-            # The current room uses <b class="amount">; revealed ones a <span>.
-            if "Комната:" not in block.get_text():
-                continue
-            number = block.find("span")
-            if number is None or block.find("b") is not None:
-                continue
-            try:
-                room = int(number.get_text(strip=True))
-            except ValueError:
-                continue
-
-            images = block.find_next_sibling("div")
-            if images is None:
-                continue
-
-            doors: dict[int, bool] = {}
-            for position, image in enumerate(images.find_all("img"), start=1):
-                source = image.get("src", "")
-                if _WALL_IMAGE in source:
-                    doors[position] = False
-                elif _PASSAGE_IMAGE in source:
-                    doors[position] = True
-            if doors:
-                layouts[room] = doors
-
-        return layouts
-
-    def learn_from(self, soup: BeautifulSoup) -> None:
-        """Record every door layout the page happens to reveal."""
-        for room, doors in self.revealed_layouts(soup).items():
-            for door, is_passage in doors.items():
-                self.memory.record(room, door, success=is_passage)
-            logger.debug(
-                "Room %d revealed: %s",
-                room,
-                ", ".join(f"{d}={'проход' if ok else 'стена'}" for d, ok in sorted(doors.items())),
-            )
-
     def is_dead_end(self, soup: BeautifulSoup) -> bool:
         """Check whether the run ended in a dead end."""
         message = wicket.find_notification(soup)
@@ -194,8 +141,8 @@ class MazeBot:
     def doors_by_number(self, soup: BeautifulSoup, page_url: str) -> dict[int, str]:
         """Map each door's number to its URL.
 
-        Doors are named ``doorLink1``, ``doorLink2``, ... and those numbers stay
-        put between requests, which is what makes remembering them worthwhile.
+        Doors are named ``doorLink1``, ``doorLink2``, ... and the numbers are
+        what the dead-end log reports, which is how the reshuffling was found.
         """
         numbered: dict[int, str] = {}
         for url in self.door_urls(soup, page_url):
@@ -229,40 +176,36 @@ class MazeBot:
         completed = 0
         attempt = 0
 
-        try:
-            while rounds == 0 or completed < rounds:
-                if budget.expired():
-                    logger.info(
-                        "Session limit of %d min reached; stopping after %d maze(s)",
-                        budget.max_minutes,
-                        completed,
-                    )
-                    break
+        while rounds == 0 or completed < rounds:
+            if budget.expired():
+                logger.info(
+                    "Session limit of %d min reached; stopping after %d maze(s)",
+                    budget.max_minutes,
+                    completed,
+                )
+                break
 
-                if max_attempts and attempt >= max_attempts:
-                    logger.warning("Gave up after %d attempts with %d maze(s) done", attempt, completed)
-                    break
+            if max_attempts and attempt >= max_attempts:
+                logger.warning("Gave up after %d attempts with %d maze(s) done", attempt, completed)
+                break
 
-                attempt += 1
-                logger.info("Attempt #%d (%d/%s done)", attempt, completed, wanted)
+            attempt += 1
+            logger.info("Attempt #%d (%d/%s done)", attempt, completed, wanted)
 
-                try:
-                    if self._walk(target):
-                        completed += 1
-                        logger.info("Maze %d/%s complete on attempt #%d", completed, wanted, attempt)
-                except OutOfKeys as exc:
-                    # Retrying cannot produce keys, so stop rather than spin.
-                    logger.warning("Stopping: %s", exc)
-                    break
-                except requests.RequestException as exc:
-                    logger.error("Attempt #%d failed: %s", attempt, exc)
+            try:
+                if self._walk(target):
+                    completed += 1
+                    logger.info("Maze %d/%s complete on attempt #%d", completed, wanted, attempt)
+            except OutOfKeys as exc:
+                # Retrying cannot produce keys, so stop rather than spin.
+                logger.warning("Stopping: %s", exc)
+                break
+            except requests.RequestException as exc:
+                logger.error("Attempt #%d failed: %s", attempt, exc)
 
-                self.human.pause(_SETBACK_MULTIPLIER)
+            self.human.pause(_SETBACK_MULTIPLIER)
 
-            return completed
-        finally:
-            # Keep what was learned even if the run is interrupted.
-            self.memory.save()
+        return completed
 
     def _walk(self, target: int) -> bool:
         """Walk one run from the entrance.
@@ -283,10 +226,6 @@ class MazeBot:
         for _ in range(budget):
             soup = wicket.parse(response.text)
 
-            # The page reveals the layout of rooms already passed, whichever
-            # screen it is, so read that before anything else.
-            self.learn_from(soup)
-
             if self.is_solved(soup):
                 reward = self.reward(soup)
                 logger.info(
@@ -296,16 +235,13 @@ class MazeBot:
 
             if self.is_dead_end(soup):
                 if pending:
-                    self.memory.record(*pending, success=False)
                     logger.info("Dead end behind room %d door %d, restarting", *pending)
                 else:
                     logger.info("Dead end, restarting")
                 return False
 
             level = self.current_level(soup)
-            if pending:
-                self.memory.record(*pending, success=True)
-                pending = None
+            pending = None
 
             if level == 0:
                 logger.warning("No room counter on %s; the maze markup may have changed", response.url)
@@ -324,13 +260,7 @@ class MazeBot:
                 logger.warning("No door links on %s; the maze markup may have changed", response.url)
                 return False
 
-            choice = self.memory.choose(level, sorted(doors))
-            logger.debug(
-                "Room %d: chose door %d (history %s)",
-                level,
-                choice,
-                self.memory.summary(level, sorted(doors)),
-            )
+            choice = random.choice(sorted(doors))
 
             # "Think" before committing to a door.
             self.human.pause()

@@ -24,17 +24,19 @@ class NeboBot:
         bot.stop()
     """
 
-    def __init__(self, config_path: str | Path = "config/config.yml"):
-        """Load the configuration and prepare the modules.
+    def __init__(self, config: str | Path | Config = "config/config.yml"):
+        """Prepare the modules for one account.
 
         Args:
-            config_path: Path to the YAML configuration file.
+            config: An already-loaded Config, or the path of a YAML file to
+                read one from. Passing a Config is what lets a single file
+                drive one bot per account.
 
         Raises:
             ConfigError: If the configuration is missing or invalid. Raised
                 rather than exiting, so callers decide how to handle it.
         """
-        self.config: Config = config_module.load(config_path)
+        self.config: Config = config if isinstance(config, Config) else config_module.load(config)
         self.auth = Auth(self.config)
         self.maze = MazeBot(self.auth, self.config)
         logger.debug("Bot initialised for %s", self.config.base_url)

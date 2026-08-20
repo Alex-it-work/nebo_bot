@@ -82,8 +82,6 @@ class Config:
         maze_rounds: How many mazes to complete per run, 0 for as many as the
             keys and limits allow.
         maze_max_attempts: Maximum maze runs before giving up, 0 for unlimited.
-        maze_memory_file: Where door knowledge is stored between runs, or None
-            to keep it in memory only.
         session_max_minutes: How long one run may play before stopping, 0 for
             no limit. A session that never ends is the least human thing a bot
             can do.
@@ -101,7 +99,6 @@ class Config:
     maze_target_level: int = 10
     maze_rounds: int = 1
     maze_max_attempts: int = 0
-    maze_memory_file: str | None = "data/maze_memory.json"
     session_max_minutes: int = 0
     active_hours: tuple[time, time] | None = None
 
@@ -128,7 +125,70 @@ def load(config_path: str | Path) -> Config:
         ConfigError: If the file is missing, unparseable, or fails validation.
     """
     path = Path(config_path)
+    return _from_mapping(_read(path), path)
 
+
+def load_all(config_path: str | Path) -> list[Config]:
+    """Read one configuration per game account.
+
+    Two shapes are accepted. A flat file describes a single account, exactly as
+    before. A file with an ``accounts:`` list describes several, each entry
+    overriding the shared ``defaults:``::
+
+        defaults:
+          delay_min: 1.5
+        accounts:
+          - username: "First"
+            password: "..."
+            maze_rounds: 3
+
+    Args:
+        config_path: Path to the YAML configuration file.
+
+    Returns:
+        One validated configuration per account, in file order.
+
+    Raises:
+        ConfigError: If the file is missing, unparseable, or fails validation.
+    """
+    path = Path(config_path)
+    raw = _read(path)
+
+    accounts = raw.get("accounts")
+    if accounts is None:
+        return [_from_mapping(raw, path)]
+
+    if not isinstance(accounts, list) or not accounts:
+        raise ConfigError(f"'accounts' in {path} must be a non-empty list")
+
+    defaults = raw.get("defaults") or {}
+    if not isinstance(defaults, dict):
+        raise ConfigError(f"'defaults' in {path} must be a mapping")
+
+    configs: list[Config] = []
+    seen: set[str] = set()
+
+    for position, account in enumerate(accounts, start=1):
+        if not isinstance(account, dict):
+            raise ConfigError(f"Account #{position} in {path} must be a mapping")
+        try:
+            config = _from_mapping({**defaults, **account}, path)
+        except ConfigError as exc:
+            # Name the offending account; with thirty of them, "'password' is
+            # required" alone would be a hunt.
+            label = account.get("username", f"#{position}")
+            raise ConfigError(f"Account {label}: {exc}") from exc
+
+        if config.username in seen:
+            raise ConfigError(f"Account {config.username} is listed more than once in {path}")
+        seen.add(config.username)
+        configs.append(config)
+
+    return configs
+
+
+def _read(path: Path) -> dict[str, Any]:
+    """Read and sanity-check the YAML file."""
     if not path.is_file():
         raise ConfigError(
             f"Configuration file not found: {path}. "
@@ -144,8 +204,7 @@ def load(config_path: str | Path) -> Config:
         raise ConfigError(f"Configuration file {path} is empty")
     if not isinstance(raw, dict):
         raise ConfigError(f"Configuration file {path} must contain a mapping at the top level")
-
-    return _from_mapping(raw, path)
+    return raw
 
 
 def _from_mapping(raw: dict[str, Any], path: Path) -> Config:
@@ -166,10 +225,6 @@ def _from_mapping(raw: dict[str, Any], path: Path) -> Config:
     log_file = raw.get("log_file", "logs/nebo_bot.log")
     if log_file is not None and not isinstance(log_file, str):
         raise ConfigError("'log_file' must be a string or empty")
-
-    memory_file = raw.get("maze_memory_file", "data/maze_memory.json")
-    if memory_file is not None and not isinstance(memory_file, str):
-        raise ConfigError("'maze_memory_file' must be a string or empty")
 
     delays = Delays(
         min_seconds=_number(raw, "delay_min", 1.5),
@@ -192,7 +247,6 @@ def _from_mapping(raw: dict[str, Any], path: Path) -> Config:
         maze_target_level=int(_number(raw, "maze_target_level", 10)),
         maze_rounds=int(_number(raw, "maze_rounds", 1)),
         maze_max_attempts=int(_number(raw, "maze_max_attempts", 0)),
-        maze_memory_file=memory_file or None,
         session_max_minutes=int(_number(raw, "session_max_minutes", 0)),
         active_hours=_active_hours(raw.get("active_hours")),
     )

@@ -8,7 +8,6 @@ from __future__ import annotations
 
 from src import wicket
 from src.config import Config, Delays
-from src.memory import DoorMemory
 from src.modules.auth import Auth
 from src.modules.maze import MazeBot
 from tests.test_auth import FakeSession
@@ -18,9 +17,7 @@ NO_DELAYS = Delays(min_seconds=0, max_seconds=0, page_load_min=0, page_load_max=
 
 def make_maze():
     config = Config(username="u", password="p", delays=NO_DELAYS)
-    # An explicit in-memory store: the default config path points at the real
-    # data/ file, and tests must neither read nor overwrite live knowledge.
-    return MazeBot(Auth(config, session=FakeSession()), config, memory=DoorMemory(None))
+    return MazeBot(Auth(config, session=FakeSession()), config)
 
 
 class TestCurrentLevel:
@@ -79,45 +76,6 @@ class TestReward:
 
     def test_no_reward_on_an_ordinary_page(self, doors_page):
         assert make_maze().reward(wicket.parse(doors_page)) == []
-
-
-class TestRevealedLayouts:
-    def test_reads_the_layout_of_the_room_just_left(self, doors_page):
-        # Room 3 showed wall, passage, passage.
-        layouts = make_maze().revealed_layouts(wicket.parse(doors_page))
-        assert layouts[3] == {1: False, 2: True, 3: True}
-
-    def test_a_room_can_hold_more_than_one_passage(self, doors_page):
-        # This is why "one correct door in three" was the wrong model.
-        layouts = make_maze().revealed_layouts(wicket.parse(doors_page))
-        assert sum(layouts[3].values()) == 2
-
-    def test_ignores_the_current_room_counter(self, doors_page):
-        # The current room is a <b>, revealed ones are <span>; room 4 is
-        # current in the fixture and must not be reported as revealed.
-        assert 4 not in make_maze().revealed_layouts(wicket.parse(doors_page))
-
-    def test_ignores_unfamiliar_door_images(self, victory_page):
-        # The victory screen shows prize doors, which are neither wall nor go.
-        assert make_maze().revealed_layouts(wicket.parse(victory_page)) == {}
-
-    def test_nothing_revealed_at_the_entrance(self, home_page):
-        assert make_maze().revealed_layouts(wicket.parse(home_page)) == {}
-
-
-class TestLearnFrom:
-    def test_records_every_revealed_door(self, doors_page):
-        maze = make_maze()
-        maze.learn_from(wicket.parse(doors_page))
-        assert maze.memory.tally(3, 1) == (0, 1)  # wall
-        assert maze.memory.tally(3, 2) == (1, 0)  # passage
-        assert maze.memory.tally(3, 3) == (1, 0)  # passage
-
-    def test_learns_about_doors_never_opened(self, doors_page):
-        # Door 2 was not the one taken, yet its layout is now known.
-        maze = make_maze()
-        maze.learn_from(wicket.parse(doors_page))
-        assert maze.memory.score(3, 2) > 0.5
 
 
 class TestIsDeadEnd:

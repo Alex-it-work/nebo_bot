@@ -1,9 +1,28 @@
 # Скопируйте этот файл в config/config.yml и укажите свои данные.
 # config/config.yml в .gitignore и в репозиторий не попадает.
 
+# --- Один профиль ---------------------------------------------------------
 # Учетные данные
 username: "Имя в игре"
 password: "ваш пароль"
+
+# --- Несколько профилей ---------------------------------------------------
+# Вместо username/password выше можно перечислить аккаунты списком. Всё, что
+# указано в defaults, действует на всех; в самом аккаунте это переопределяется.
+# Запуск: python main.py — все по очереди, python main.py -a "Имя" — только один.
+#
+# defaults:
+#   delay_min: 1.5
+#   delay_max: 3.5
+#   active_hours: "09:00-23:30"
+#   maze_rounds: 1
+#
+# accounts:
+#   - username: "Первый"
+#     password: "пароль1"
+#     maze_rounds: 3      # этому — три лабиринта
+#   - username: "Второй"
+#     password: "пароль2" # этому — один, как в defaults
 
 # Настройки подключения
 base_url: "https://nebo.mobi"
@@ -35,10 +54,6 @@ active_hours: ""
 # Лабиринт
 maze_target_level: 10
 maze_max_attempts: 0 # 0 — без ограничения
-
-# Накопленная статистика по дверям. Чем дольше бот играет, тем лучше выбирает.
-# Оставьте пустым, чтобы не сохранять между запусками.
-maze_memory_file: "data/maze_memory.json"
 
 # Логирование
 log_level: "INFO" # DEBUG, INFO, WARNING, ERROR, CRITICAL
