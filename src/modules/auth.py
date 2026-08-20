@@ -89,11 +89,16 @@ class Auth:
                 return True
 
             # Not authenticated: surface whatever the server complained about.
-            message = wicket.find_notification(wicket.parse(response.text))
-            if message:
-                logger.error("Login rejected: %s", message)
+            # Bad credentials land in Wicket's feedback panel, other problems
+            # in the game's own banner, so check both.
+            soup = wicket.parse(response.text)
+            reason = wicket.find_error(soup) or wicket.find_notification(soup)
+            if reason:
+                logger.error("Login failed for %s: %s", self.config.username, reason)
             else:
-                logger.error("Login failed; the session is not authenticated")
+                logger.error(
+                    "Login failed for %s; the session is not authenticated", self.config.username
+                )
             return False
 
         except wicket.WicketError as exc:

@@ -189,3 +189,23 @@ def find_notification(soup: BeautifulSoup) -> str | None:
         return None
     text = notify.get_text(strip=True)
     return text or None
+
+
+def find_error(soup: BeautifulSoup) -> str | None:
+    """Return the text of Wicket's feedback panel error, if any.
+
+    Form errors do not use the game's ``<span class="notify">`` banner. They
+    come back in the framework's own feedback panel::
+
+        <li class="errorlevel feedbackPanelERROR">
+          <span class="errorlevel">Неверное имя или пароль</span>
+        </li>
+
+    Reporting it is what turns "login failed" into something actionable when a
+    whole list of accounts is being run.
+    """
+    panel = soup.find(class_="feedbackPanelERROR")
+    if panel is None:
+        return None
+    text = panel.get_text(" ", strip=True)
+    return text or None

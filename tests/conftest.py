@@ -52,3 +52,8 @@ def dead_end_page() -> str:
 def victory_page() -> str:
     """The screen shown after the prize door is opened."""
     return load_fixture("victory.html")
+
+@pytest.fixture
+def login_error_page() -> str:
+    """The login page after credentials were rejected."""
+    return load_fixture("login_error.html")

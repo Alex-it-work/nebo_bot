@@ -128,3 +128,16 @@ class TestFindNotification:
 
     def test_returns_none_without_a_banner(self, doors_page):
         assert wicket.find_notification(wicket.parse(doors_page)) is None
+
+
+class TestFindError:
+    def test_reads_the_feedback_panel_error(self, login_error_page):
+        # Rejected credentials do not use the game's notify banner, so this is
+        # the only way to report why an account failed to log in.
+        assert wicket.find_error(wicket.parse(login_error_page)) == "Неверное имя или пароль"
+
+    def test_none_on_a_clean_page(self, login_page):
+        assert wicket.find_error(wicket.parse(login_page)) is None
+
+    def test_none_when_the_panel_is_empty(self):
+        assert wicket.find_error(wicket.parse('<li class="feedbackPanelERROR"></li>')) is None
