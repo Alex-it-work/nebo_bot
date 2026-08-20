@@ -13,11 +13,12 @@ All selectors here have been confirmed against live runs, dead-end banner
 included.
 
 Doors are chosen at random, and measurement says nothing better is available.
-Over 40 attempts every door in rooms 2 to 9 turned up as both a wall and a
-passage, so the layout is reshuffled on each attempt and no door can be
-learned. The first room always opens (39 of 39) and so does the last, while
-the rooms between pass roughly 55-75% of the time: about one run in 44
-reaches the prize, at some 150 keys apiece.
+Over 58 attempts across two accounts every door in rooms 2 to 9 turned up as
+both a wall and a passage, so the layout is reshuffled on each attempt and no
+door can be learned. The first room always opens (57 of 57) and so does the
+last, while the rooms between pass 50-75% of the time. That works out at about
+one run in 30 reaching the prize, some 110 keys apiece, and the odds do not
+differ between accounts.
 
 The page does reveal each room's layout once it is behind you, but by then it
 has already been reshuffled, so that knowledge cannot inform a choice either.
