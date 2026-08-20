@@ -79,6 +79,8 @@ class Config:
         log_level: Logging level name.
         log_file: Path of the log file, or None to log to stdout only.
         maze_target_level: Depth at which the maze counts as solved.
+        maze_rounds: How many mazes to complete per run, 0 for as many as the
+            keys and limits allow.
         maze_max_attempts: Maximum maze runs before giving up, 0 for unlimited.
         maze_memory_file: Where door knowledge is stored between runs, or None
             to keep it in memory only.
@@ -97,6 +99,7 @@ class Config:
     log_level: str = "INFO"
     log_file: str | None = "logs/nebo_bot.log"
     maze_target_level: int = 10
+    maze_rounds: int = 1
     maze_max_attempts: int = 0
     maze_memory_file: str | None = "data/maze_memory.json"
     session_max_minutes: int = 0
@@ -187,6 +190,7 @@ def _from_mapping(raw: dict[str, Any], path: Path) -> Config:
         log_level=log_level,
         log_file=log_file or None,
         maze_target_level=int(_number(raw, "maze_target_level", 10)),
+        maze_rounds=int(_number(raw, "maze_rounds", 1)),
         maze_max_attempts=int(_number(raw, "maze_max_attempts", 0)),
         maze_memory_file=memory_file or None,
         session_max_minutes=int(_number(raw, "session_max_minutes", 0)),

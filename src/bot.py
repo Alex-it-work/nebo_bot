@@ -67,7 +67,13 @@ class NeboBot:
             logger.error("Cannot run features without an authenticated session")
             return False
 
-        return self.maze.solve()
+        completed = self.maze.solve()
+        wanted = self.config.maze_rounds
+        if wanted:
+            logger.info("Completed %d of %d maze(s)", completed, wanted)
+            return completed >= wanted
+        logger.info("Completed %d maze(s)", completed)
+        return completed > 0
 
     def stop(self) -> None:
         """Log out and release the session.

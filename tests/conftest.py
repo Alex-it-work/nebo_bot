@@ -38,7 +38,7 @@ def home_page() -> str:
 
 @pytest.fixture
 def doors_page() -> str:
-    """A maze page offering two doors."""
+    """A maze page offering three doors, with room 3's layout revealed."""
     return load_fixture("doors.html")
 
 
@@ -46,3 +46,9 @@ def doors_page() -> str:
 def dead_end_page() -> str:
     """A maze page reporting a dead end."""
     return load_fixture("dead_end.html")
+
+
+@pytest.fixture
+def victory_page() -> str:
+    """The screen shown after the prize door is opened."""
+    return load_fixture("victory.html")

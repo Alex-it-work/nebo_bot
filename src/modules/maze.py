@@ -44,6 +44,14 @@ _SETBACK_MULTIPLIER = 1.5
 # Steps allowed per attempt, as a multiple of the target room count.
 _STEP_BUDGET_FACTOR = 3
 
+# The victory screen drops the room counter entirely, so a win is recognised by
+# its text: "Поздравляем! Вы прошли лабиринт!".
+_VICTORY_PATTERN = re.compile(r"прошли\s+лабиринт", re.I)
+
+# Images used on the revealed layout of a room already left behind.
+_WALL_IMAGE = "door_wall"
+_PASSAGE_IMAGE = "door_go"
+
 # "Осталось ключей: 1707" — the number may carry thousand separators.
 _KEYS_PATTERN = re.compile(r"Осталось\s+ключей:\s*(\d[\d'’ ]*)")
 
@@ -101,6 +109,77 @@ class MazeBot:
             logger.debug("Could not read the level counter: %r", amount.get_text(strip=True))
             return 0
 
+    def is_solved(self, soup: BeautifulSoup) -> bool:
+        """Check whether this page is the victory screen.
+
+        Reaching the final room is not the same as winning: one more door has
+        to be opened there, and only then does the prize appear.
+        """
+        return _VICTORY_PATTERN.search(soup.get_text(" ", strip=True)) is not None
+
+    def reward(self, soup: BeautifulSoup) -> list[str]:
+        """Return the reward amounts shown on the victory screen."""
+        label = soup.find("span", class_="white")
+        if label is None:
+            return []
+        return [
+            amount.get_text(strip=True)
+            for amount in label.find_all_next("span", class_="amount")
+            if amount.get_text(strip=True)
+        ][:2]
+
+    def revealed_layouts(self, soup: BeautifulSoup) -> dict[int, dict[int, bool]]:
+        """Read the layouts the page reveals for rooms already left behind.
+
+        After moving on, the game shows what was behind each door of the
+        previous room: ``door_wall`` for a dead end, ``door_go`` for a passage.
+        That is free, exact information about doors never opened, and it shows
+        rooms can hold more than one passage.
+
+        Returns:
+            Room number mapped to door number mapped to "is a passage".
+        """
+        layouts: dict[int, dict[int, bool]] = {}
+
+        for block in soup.find_all("div", class_="m5"):
+            # The current room uses <b class="amount">; revealed ones a <span>.
+            if "Комната:" not in block.get_text():
+                continue
+            number = block.find("span")
+            if number is None or block.find("b") is not None:
+                continue
+            try:
+                room = int(number.get_text(strip=True))
+            except ValueError:
+                continue
+
+            images = block.find_next_sibling("div")
+            if images is None:
+                continue
+
+            doors: dict[int, bool] = {}
+            for position, image in enumerate(images.find_all("img"), start=1):
+                source = image.get("src", "")
+                if _WALL_IMAGE in source:
+                    doors[position] = False
+                elif _PASSAGE_IMAGE in source:
+                    doors[position] = True
+            if doors:
+                layouts[room] = doors
+
+        return layouts
+
+    def learn_from(self, soup: BeautifulSoup) -> None:
+        """Record every door layout the page happens to reveal."""
+        for room, doors in self.revealed_layouts(soup).items():
+            for door, is_passage in doors.items():
+                self.memory.record(room, door, success=is_passage)
+            logger.debug(
+                "Room %d revealed: %s",
+                room,
+                ", ".join(f"{d}={'проход' if ok else 'стена'}" for d, ok in sorted(doors.items())),
+            )
+
     def is_dead_end(self, soup: BeautifulSoup) -> bool:
         """Check whether the run ended in a dead end."""
         message = wicket.find_notification(soup)
@@ -125,51 +204,62 @@ class MazeBot:
                 numbered[int(match.group(1))] = url
         return numbered
 
-    def solve(self) -> bool:
-        """Run the maze until the target level is reached.
+    def solve(self, rounds: int | None = None) -> int:
+        """Complete whole mazes, prize included.
 
-        Restarts from the entrance on every dead end, up to the configured
-        attempt limit.
+        A dead end restarts from the entrance; so does a win, since "Начать
+        сначала" simply links back to the maze entrance.
+
+        Args:
+            rounds: How many mazes to complete, or 0 for as many as the keys,
+                attempt limit and session budget allow. Defaults to the
+                configured value.
 
         Returns:
-            True if the target level was reached.
+            The number of mazes completed.
         """
         target = self.config.maze_target_level
+        rounds = self.config.maze_rounds if rounds is None else rounds
         max_attempts = self.config.maze_max_attempts
+        budget = SessionBudget(self.config.session_max_minutes)
+        wanted = str(rounds) if rounds else "unlimited"
+
+        logger.info("Solving mazes: %s to complete, %d rooms each", wanted, target)
+
+        completed = 0
         attempt = 0
 
-        logger.info("Solving the maze, target level %d", target)
-
-        budget = SessionBudget(self.config.session_max_minutes)
-
         try:
-            while max_attempts == 0 or attempt < max_attempts:
+            while rounds == 0 or completed < rounds:
                 if budget.expired():
                     logger.info(
-                        "Session limit of %d min reached after %d attempts; stopping",
+                        "Session limit of %d min reached; stopping after %d maze(s)",
                         budget.max_minutes,
-                        attempt,
+                        completed,
                     )
-                    return False
+                    break
+
+                if max_attempts and attempt >= max_attempts:
+                    logger.warning("Gave up after %d attempts with %d maze(s) done", attempt, completed)
+                    break
 
                 attempt += 1
-                logger.info("Maze attempt #%d", attempt)
+                logger.info("Attempt #%d (%d/%s done)", attempt, completed, wanted)
 
                 try:
                     if self._walk(target):
-                        logger.info("Maze solved on attempt #%d", attempt)
-                        return True
+                        completed += 1
+                        logger.info("Maze %d/%s complete on attempt #%d", completed, wanted, attempt)
                 except OutOfKeys as exc:
                     # Retrying cannot produce keys, so stop rather than spin.
                     logger.warning("Stopping: %s", exc)
-                    return False
+                    break
                 except requests.RequestException as exc:
-                    logger.error("Maze attempt #%d failed: %s", attempt, exc)
+                    logger.error("Attempt #%d failed: %s", attempt, exc)
 
                 self.human.pause(_SETBACK_MULTIPLIER)
 
-            logger.warning("Gave up on the maze after %d attempts", attempt)
-            return False
+            return completed
         finally:
             # Keep what was learned even if the run is interrupted.
             self.memory.save()
@@ -193,6 +283,17 @@ class MazeBot:
         for _ in range(budget):
             soup = wicket.parse(response.text)
 
+            # The page reveals the layout of rooms already passed, whichever
+            # screen it is, so read that before anything else.
+            self.learn_from(soup)
+
+            if self.is_solved(soup):
+                reward = self.reward(soup)
+                logger.info(
+                    "Maze complete%s", f", reward: {' + '.join(reward)}" if reward else ""
+                )
+                return True
+
             if self.is_dead_end(soup):
                 if pending:
                     self.memory.record(*pending, success=False)
@@ -206,13 +307,14 @@ class MazeBot:
                 self.memory.record(*pending, success=True)
                 pending = None
 
+            if level == 0:
+                logger.warning("No room counter on %s; the maze markup may have changed", response.url)
+                return False
+
             keys = self.keys_left(soup)
             logger.info(
                 "Room %d/%d%s", level, target, f", keys left: {keys}" if keys is not None else ""
             )
-
-            if level >= target:
-                return True
 
             if keys == 0:
                 raise OutOfKeys("No keys left to open another door")
