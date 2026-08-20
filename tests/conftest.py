@@ -57,3 +57,8 @@ def victory_page() -> str:
 def login_error_page() -> str:
     """The login page after credentials were rejected."""
     return load_fixture("login_error.html")
+
+@pytest.fixture
+def quests_page() -> str:
+    """The personal task page, mirroring the live markup."""
+    return load_fixture("quests.html")

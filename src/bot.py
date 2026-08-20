@@ -5,10 +5,13 @@ from __future__ import annotations
 import logging
 from pathlib import Path
 
+import requests
+
 from . import config as config_module
 from .config import Config
 from .modules.auth import Auth
 from .modules.maze import MazeBot
+from .modules.quests import QuestBot
 from .utils.human_like import within_active_hours
 
 logger = logging.getLogger(__name__)
@@ -39,6 +42,7 @@ class NeboBot:
         self.config: Config = config if isinstance(config, Config) else config_module.load(config)
         self.auth = Auth(self.config)
         self.maze = MazeBot(self.auth, self.config)
+        self.quests = QuestBot(self.auth, self.config)
         logger.debug("Bot initialised for %s", self.config.base_url)
 
     def start(self) -> bool:
@@ -68,6 +72,13 @@ class NeboBot:
         if not self.auth.is_authenticated():
             logger.error("Cannot run features without an authenticated session")
             return False
+
+        # Keys come from the personal tasks, and the maze only spends them, so
+        # report that state before playing.
+        try:
+            self.quests.report()
+        except requests.RequestException as exc:
+            logger.warning("Could not read the task page: %s", exc)
 
         completed = self.maze.solve()
         wanted = self.config.maze_rounds
