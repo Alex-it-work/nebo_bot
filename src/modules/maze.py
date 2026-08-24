@@ -249,8 +249,15 @@ class MazeBot:
                 return False
 
             keys = self.keys_left(soup)
+            # The online count rides along so "the maze is easier when it is
+            # quiet" can be checked against data later.
+            online = wicket.find_online_count(soup)
             logger.info(
-                "Room %d/%d%s", level, target, f", keys left: {keys}" if keys is not None else ""
+                "Room %d/%d%s%s",
+                level,
+                target,
+                f", keys left: {keys}" if keys is not None else "",
+                f", online: {online}" if online is not None else "",
             )
 
             if keys == 0:

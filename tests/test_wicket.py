@@ -141,3 +141,13 @@ class TestFindError:
 
     def test_none_when_the_panel_is_empty(self):
         assert wicket.find_error(wicket.parse('<li class="feedbackPanelERROR"></li>')) is None
+
+
+class TestOnlineCount:
+    def test_reads_the_footer_count(self, doors_page):
+        page = doors_page.replace('<a href="./home">На главную</a>',
+                                  '<a href="./online">Онлайн: 19\'610</a>')
+        assert wicket.find_online_count(wicket.parse(page)) == 19610
+
+    def test_none_when_absent(self, login_page):
+        assert wicket.find_online_count(wicket.parse(login_page)) is None

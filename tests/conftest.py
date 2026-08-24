@@ -73,3 +73,8 @@ def lift_page() -> str:
 def lift_capped_page() -> str:
     """The lift once the day's tips are exhausted."""
     return load_fixture("lift_capped.html")
+
+@pytest.fixture
+def humans_page() -> str:
+    """The resident list, with (+) and (-) markers as the live page renders them."""
+    return load_fixture("humans.html")

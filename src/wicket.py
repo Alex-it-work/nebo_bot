@@ -24,6 +24,8 @@ Two consequences drive the design below:
 
 from __future__ import annotations
 
+import re
+
 from dataclasses import dataclass, field
 from urllib.parse import urljoin
 
@@ -209,3 +211,17 @@ def find_error(soup: BeautifulSoup) -> str | None:
         return None
     text = panel.get_text(" ", strip=True)
     return text or None
+
+
+def find_online_count(soup: BeautifulSoup) -> int | None:
+    """Return how many players the footer reports as online.
+
+    Recorded alongside maze outcomes so the belief that the maze is easier at
+    quiet hours can be tested rather than argued about.
+    """
+    for link in soup.find_all("a"):
+        text = link.get_text(" ", strip=True)
+        if text.startswith("Онлайн:"):
+            digits = re.sub(r"\D", "", text)
+            return int(digits) if digits else None
+    return None
