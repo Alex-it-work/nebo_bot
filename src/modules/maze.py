@@ -16,9 +16,10 @@ Doors are chosen at random, and measurement says nothing better is available.
 Over 58 attempts across two accounts every door in rooms 2 to 9 turned up as
 both a wall and a passage, so the layout is reshuffled on each attempt and no
 door can be learned. The first room always opens (57 of 57) and so does the
-last, while the rooms between pass 50-75% of the time. That works out at about
-one run in 30 reaching the prize, some 110 keys apiece, and the odds do not
-differ between accounts.
+last, while the rooms between pass about 65% of the time regardless of depth.
+Nine consecutive successes are needed, so roughly one run in 32 reaches the
+prize, at some 120 keys apiece. Estimates from two or three prizes swing
+wildly and should not be trusted.
 
 The page does reveal each room's layout once it is behind you, but by then it
 has already been reshuffled, so that knowledge cannot inform a choice either.
