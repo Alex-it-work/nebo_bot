@@ -71,3 +71,18 @@ class TestBulkEviction:
     def test_never_mistakes_the_job_centre_for_eviction(self, humans_page):
         url = make_bot().bulk_evict_url(wicket.parse(humans_page), URL)
         assert "vendor" not in url
+
+
+class TestNothingToEvict:
+    def test_an_empty_hotel_yields_no_candidates(self, home_page):
+        bot = make_bot()
+        assert bot.evictable(bot.residents(wicket.parse(home_page), URL)) == []
+
+    def test_a_hotel_of_keepers_yields_no_candidates(self):
+        page = ('<ul class="rsd"><li><a href="./human/9?1=3">x</a><div class="rsdst">'
+                '<a href="./human/9?1=3" class="white"><span>Ценный</span></a>'
+                '<b class="abstr"><span>6</span></b>'
+                '<span class="small">Салон</span><span class="amount">(+)</span></div></li></ul>')
+        bot = make_bot()
+        people = bot.residents(wicket.parse(page), URL)
+        assert len(people) == 1 and bot.evictable(people) == []

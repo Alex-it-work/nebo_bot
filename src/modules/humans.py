@@ -143,9 +143,16 @@ class HumansBot:
 
         while evicted < limit:
             soup, page_url = self.fetch()
-            candidates = self.evictable(self.residents(soup, page_url))
+            residents = self.residents(soup, page_url)
+            candidates = self.evictable(residents)
             if not candidates:
-                logger.info("No one left to evict; everyone remaining is marked (+)")
+                # An empty hotel and a hotel full of keepers both leave nothing
+                # to do, but they mean opposite things to whoever reads the log.
+                logger.info(
+                    "Nobody left to evict: the hotel is empty"
+                    if not residents
+                    else "Nobody left to evict: all %d remaining are marked (+)" % len(residents)
+                )
                 break
             if not self.evict(candidates[0]):
                 break
