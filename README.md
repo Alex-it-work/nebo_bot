@@ -95,7 +95,8 @@ src/wicket.py            Всё, что зависит от фреймворка
 src/bot.py               Оркестрация модулей
 src/modules/auth.py      Вход, выход, проверка сессии
 src/modules/maze.py      Лабиринт
-src/modules/quests.py    Личные задания: прогресс и откаты
+src/modules/quests.py    Личные задания: прогресс, награды, откаты
+src/modules/lift.py      Лифт: подъёмы, чаевые, развоз
 src/utils/human_like.py  Паузы
 ```
 

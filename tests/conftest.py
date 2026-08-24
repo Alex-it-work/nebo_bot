@@ -62,3 +62,14 @@ def login_error_page() -> str:
 def quests_page() -> str:
     """The personal task page, mirroring the live markup."""
     return load_fixture("quests.html")
+
+@pytest.fixture
+def lift_page() -> str:
+    """The lift with visitors waiting and tips still accruing."""
+    return load_fixture("lift.html")
+
+
+@pytest.fixture
+def lift_capped_page() -> str:
+    """The lift once the day's tips are exhausted."""
+    return load_fixture("lift_capped.html")
