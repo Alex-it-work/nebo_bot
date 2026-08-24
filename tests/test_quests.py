@@ -154,3 +154,32 @@ class TestRewardParsing:
 
     def test_no_reward_block_gives_an_empty_tuple(self, quests_page):
         assert by_name(make_bot().parse(wicket.parse(quests_page)), "Инвестор").reward == ()
+
+
+class TestDoubling:
+    BANNERS = ('<div>Cегодня за задания Вы получаете в два раза больше ключей!</div>'
+               '<div>Завтра за все задания будет в два раза больше ключей!</div>')
+
+    def test_reads_both_banners(self):
+        assert make_bot().doubling(wicket.parse(self.BANNERS)) == (True, True)
+
+    def test_reads_only_tomorrow(self):
+        page = '<div>Завтра за все задания будет в два раза больше ключей!</div>'
+        assert make_bot().doubling(wicket.parse(page)) == (False, True)
+
+    def test_no_banners_means_no_doubling(self, quests_page):
+        assert make_bot().doubling(wicket.parse(quests_page)) == (False, False)
+
+
+class TestQuota:
+    def test_reports_what_is_left_of_the_daily_seven(self, quests_page):
+        # The fixture says 7 of 7, so the quota is met.
+        assert make_bot().quota_left(wicket.parse(quests_page)) == 0
+
+    def test_counts_claims_not_finished_work(self):
+        # Claiming six rewards moved the live counter to 6 of 7.
+        page = '<div>Сегодня выполнено заданий: <span>6</span> из <span>7</span></div>'
+        assert make_bot().quota_left(wicket.parse(page)) == 1
+
+    def test_zero_when_the_page_says_nothing(self, home_page):
+        assert make_bot().quota_left(wicket.parse(home_page)) == 0

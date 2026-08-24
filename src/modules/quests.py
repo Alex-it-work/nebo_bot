@@ -43,6 +43,12 @@ _AWARD_COMPONENT = "getAwar"
 _PROGRESS = re.compile(r"Прогресс:\s*([\d'’ ]+)\s*из\s*([\d'’ ]+)")
 _COOLDOWN = re.compile(r"До\s+старта:\s*(?:(\d+)\s*ч)?\s*(?:(\d+)\s*мин)?")
 _DONE_TODAY = re.compile(r"Сегодня\s+выполнено\s+заданий:\s*(\d+)\s*из\s*(\d+)")
+# The game states the key bonus outright rather than leaving it to be inferred:
+# "Cегодня за задания Вы получаете в два раза больше ключей!" and
+# "Завтра за все задания будет в два раза больше ключей!".
+_DOUBLE_TODAY = re.compile(r"[СC]егодня[^.!]*два\s+раза\s+больше\s+ключей")
+_DOUBLE_TOMORROW = re.compile(r"Завтра[^.!]*два\s+раза\s+больше\s+ключей")
+
 _KEYS_EARNED = re.compile(r"Собрано\s+ключей:\s*([\d'’ ]+)")
 
 # Tasks asking for real money. The bot must never act on these.
@@ -272,6 +278,26 @@ class QuestBot:
         """Return how many keys the tasks have produced, as the page reports."""
         match = _KEYS_EARNED.search(soup.get_text(" ", strip=True))
         return _number(match.group(1)) if match else None
+
+    def doubling(self, soup: BeautifulSoup) -> tuple[bool, bool]:
+        """Return whether keys are doubled ``(today, tomorrow)``.
+
+        Doubling is earned by claiming the full daily quota the day before, so
+        the "tomorrow" banner is really a receipt for having hit today's seven.
+        Reading the banners beats recomputing the rule from the calendar.
+        """
+        text = soup.get_text(" ", strip=True)
+        return bool(_DOUBLE_TODAY.search(text)), bool(_DOUBLE_TOMORROW.search(text))
+
+    def quota_left(self, soup: BeautifulSoup) -> int:
+        """Return how many more claims today would reach the daily quota.
+
+        The counter tracks claims, not finished work: claiming six rewards
+        moved it to six of seven. That is what makes it possible to do the work
+        on one day and register it on another.
+        """
+        completed, allowed = self.done_today(soup)
+        return max(0, allowed - completed) if allowed else 0
 
     def next_available_in(self, quests: list[Quest]) -> int | None:
         """Return minutes until the soonest task unlocks.
