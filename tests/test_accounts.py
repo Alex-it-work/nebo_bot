@@ -7,7 +7,7 @@ import yaml
 
 from src import config as config_module
 from src.config import Config, ConfigError
-from main import select_accounts
+from main import apply_overrides, select_accounts
 
 MULTI = {
     "defaults": {"delay_min": 2, "delay_max": 4, "maze_rounds": 1},
@@ -99,3 +99,21 @@ class TestOutputEncoding:
         config = write(tmp_path, {"accounts": [{"username": "Профиль А", "password": "pw"}]})
         assert main_module.main(["-c", str(config), "--list-accounts"]) == 0
         assert "Профиль А" in capsys.readouterr().out
+
+
+class TestRoundsOverride:
+    def test_leaves_configs_alone_without_the_flag(self):
+        configs = [Config(username="A", password="p", maze_rounds=3)]
+        assert apply_overrides(configs, None)[0].maze_rounds == 3
+
+    def test_overrides_every_selected_account(self):
+        configs = [Config(username="A", password="p", maze_rounds=3),
+                   Config(username="B", password="p", maze_rounds=1)]
+        assert [c.maze_rounds for c in apply_overrides(configs, 4)] == [4, 4]
+
+    def test_zero_means_unlimited(self):
+        assert apply_overrides([Config(username="A", password="p")], 0)[0].maze_rounds == 0
+
+    def test_rejects_a_negative_count(self):
+        with pytest.raises(ConfigError, match="negative"):
+            apply_overrides([Config(username="A", password="p")], -1)

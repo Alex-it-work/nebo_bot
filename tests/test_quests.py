@@ -106,3 +106,30 @@ class TestDescriptionParsing:
     def test_cooldown_description_comes_from_the_grey_line(self, quests_page):
         task = by_name(make_bot().parse(wicket.parse(quests_page)), "Индиана Джонс")
         assert task.description == "Пройди лабиринт 1 раз"
+
+
+class TestClaimable:
+    def test_finds_the_reward_link_of_a_finished_task(self, quests_page):
+        # Finishing is not collecting: the reward needs a separate click, and
+        # the 20-hour cooldown only starts once it is taken.
+        urls = make_bot().claimable(wicket.parse(quests_page), "https://nebo.mobi/quests")
+        assert urls == ["https://nebo.mobi/quests?3-1.-completedQuests-1-quest-getAwarLink"]
+
+    def test_ignores_tasks_still_in_progress(self, quests_page):
+        urls = make_bot().claimable(wicket.parse(quests_page), "https://nebo.mobi/quests")
+        assert len(urls) == 1
+
+    def test_nothing_to_claim_elsewhere(self, home_page):
+        assert make_bot().claimable(wicket.parse(home_page), "https://nebo.mobi/home") == []
+
+    def test_matches_the_games_own_misspelling(self, quests_page):
+        # The component is "getAwarLink", not "getAwardLink".
+        urls = make_bot().claimable(wicket.parse(quests_page), "https://nebo.mobi/quests")
+        assert "getAwarLink" in urls[0]
+
+    def test_matches_both_spellings_the_game_uses(self):
+        # /quests renders "getAwarLink", /tasks renders "getAwardLink".
+        page = '''<a href="./quests?3-1.-completedQuests-0-quest-getAwarLink">Получить награду!</a>
+        <a href="./tasks?11-1.-tasks-2-task-taskBlock-getAwardLink">Получить награду!</a>'''
+        urls = make_bot().claimable(wicket.parse(page), "https://nebo.mobi/quests")
+        assert len(urls) == 2

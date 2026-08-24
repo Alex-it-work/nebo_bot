@@ -5,6 +5,7 @@ from __future__ import annotations
 import argparse
 import logging
 import sys
+from dataclasses import replace
 from pathlib import Path
 
 from src.bot import NeboBot
@@ -50,6 +51,12 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
         help="run only this account; repeat the flag to select several",
     )
     parser.add_argument(
+        "--rounds",
+        type=int,
+        metavar="N",
+        help="override how many mazes to complete for this run",
+    )
+    parser.add_argument(
         "--list-accounts",
         action="store_true",
         help="print the configured accounts and exit",
@@ -80,6 +87,15 @@ def select_accounts(configs: list[Config], wanted: list[str] | None) -> list[Con
             f"No such account(s): {', '.join(missing)}. Configured: {', '.join(by_name)}"
         )
     return [config for config in configs if config.username in set(wanted)]
+
+
+def apply_overrides(configs: list[Config], rounds: int | None) -> list[Config]:
+    """Apply one-off command line overrides to every selected account."""
+    if rounds is None:
+        return configs
+    if rounds < 0:
+        raise ConfigError("--rounds cannot be negative")
+    return [replace(config, maze_rounds=rounds) for config in configs]
 
 
 def run_account(config: Config, login_only: bool) -> bool:
@@ -139,7 +155,9 @@ def main(argv: list[str] | None = None) -> int:
 
     # Logging is not configured yet, so configuration errors go to stderr.
     try:
-        configs = select_accounts(config_module.load_all(args.config), args.account)
+        configs = apply_overrides(
+            select_accounts(config_module.load_all(args.config), args.account), args.rounds
+        )
     except ConfigError as exc:
         print(f"Configuration error: {exc}", file=sys.stderr)
         return 1

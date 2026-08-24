@@ -34,6 +34,12 @@ from ..modules.auth import Auth
 
 logger = logging.getLogger(__name__)
 
+# Wicket component behind "Получить награду!". The two pages spell it
+# differently — /quests uses "getAwarLink", /tasks "getAwardLink" — so the
+# match is on the common prefix. Matching the component name also survives the
+# page-version number that changes on every render.
+_AWARD_COMPONENT = "getAwar"
+
 _PROGRESS = re.compile(r"Прогресс:\s*([\d'’ ]+)\s*из\s*([\d'’ ]+)")
 _COOLDOWN = re.compile(r"До\s+старта:\s*(?:(\d+)\s*ч)?\s*(?:(\d+)\s*мин)?")
 _DONE_TODAY = re.compile(r"Сегодня\s+выполнено\s+заданий:\s*(\d+)\s*из\s*(\d+)")
@@ -158,6 +164,59 @@ class QuestBot:
             if not text.startswith(("Прогресс", "Награда", "До старта")):
                 return text
         return ""
+
+    def claimable(self, soup: BeautifulSoup, page_url: str) -> list[str]:
+        """Return the URLs of every reward waiting to be taken.
+
+        Finishing a task is not the end of it: the reward has to be claimed
+        separately, and the 20-hour cooldown only starts once it is.
+        """
+        urls = wicket.find_links_containing(soup, _AWARD_COMPONENT, page_url)
+        logger.debug("Found %d claimable reward(s)", len(urls))
+        return urls
+
+    def claim_all(self, path: str = "/quests") -> int:
+        """Take every reward currently available on a page.
+
+        Each claim re-renders the page and invalidates the remaining links, so
+        the page is re-read after every one rather than walking a stale list.
+
+        Args:
+            path: Page to collect from, e.g. "/quests" or "/tasks".
+
+        Returns:
+            How many rewards were taken.
+        """
+        taken = 0
+
+        while True:
+            response = self.session.get(self.config.url(path), timeout=self.config.timeout)
+            response.raise_for_status()
+            self.human.pause_page_load()
+
+            urls = self.claimable(wicket.parse(response.text), response.url)
+            if not urls:
+                break
+
+            self.human.pause()
+            claimed = self.session.get(urls[0], timeout=self.config.timeout)
+            claimed.raise_for_status()
+            taken += 1
+
+            reward = self._reward_message(wicket.parse(claimed.text))
+            logger.info("Reward taken%s", f": {reward}" if reward else "")
+            self.human.pause_page_load()
+
+        if taken:
+            logger.info("Collected %d reward(s) from %s", taken, path)
+        else:
+            logger.info("Nothing to collect on %s", path)
+        return taken
+
+    @staticmethod
+    def _reward_message(soup: BeautifulSoup) -> str | None:
+        """Return whatever the game said after a reward was taken."""
+        return wicket.find_notification(soup)
 
     def done_today(self, soup: BeautifulSoup) -> tuple[int, int]:
         """Return ``(completed, allowed)`` tasks for today."""
