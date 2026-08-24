@@ -133,3 +133,24 @@ class TestClaimable:
         <a href="./tasks?11-1.-tasks-2-task-taskBlock-getAwardLink">Получить награду!</a>'''
         urls = make_bot().claimable(wicket.parse(page), "https://nebo.mobi/quests")
         assert len(urls) == 2
+
+
+class TestRewardParsing:
+    def test_reads_the_currencies_from_their_icons(self, quests_page):
+        # The amounts carry no label; only the icon says what they are.
+        task = by_name(make_bot().parse(wicket.parse(quests_page)), "Инкассатор")
+        assert task.reward == (("баксы", 1), ("монеты", 75000))
+
+    def test_renders_the_reward_for_logs(self, quests_page):
+        task = by_name(make_bot().parse(wicket.parse(quests_page)), "Инкассатор")
+        assert task.reward_text == "1 баксы + 75000 монеты"
+
+    def test_keeps_an_unknown_icon_visible(self):
+        page = '''<div class="nfl"><div><b>Тест</b></div><div class="white">Описание</div>
+        <div class="minor small nshd">Прогресс: <span>1</span> из <span>2</span></div>
+        <div class="m5">Награда: <span class="nwr amount">
+        <span><img src="/images/icons/mystery.png"/><span>5</span></span></span></div></div>'''
+        assert make_bot().parse(wicket.parse(page))[0].reward == (("mystery", 5),)
+
+    def test_no_reward_block_gives_an_empty_tuple(self, quests_page):
+        assert by_name(make_bot().parse(wicket.parse(quests_page)), "Инвестор").reward == ()

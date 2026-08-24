@@ -55,6 +55,17 @@ def _number(text: str) -> int:
     return int(digits) if digits else 0
 
 
+# Reward icons name the currency; the game gives no text label. The same coin
+# is drawn as st_sold on a task card and mn_iron in the header.
+_CURRENCY = {
+    "key": "ключи",
+    "mn_gold": "баксы",
+    "st_sold": "монеты",
+    "mn_iron": "монеты",
+    "star": "опыт",
+}
+
+
 @dataclass(frozen=True)
 class Quest:
     """One personal task.
@@ -66,6 +77,7 @@ class Quest:
         total: Target, 0 while on cooldown.
         minutes_left: Minutes until it becomes available, or None if active.
         paid: Whether it requires topping up with real money.
+        reward: What it pays, as ``(currency, amount)`` pairs.
     """
 
     name: str
@@ -74,6 +86,17 @@ class Quest:
     total: int = 0
     minutes_left: int | None = None
     paid: bool = False
+    reward: tuple[tuple[str, int], ...] = ()
+
+    @property
+    def reward_text(self) -> str:
+        """The reward rendered for logs, e.g. "1 баксы + 75000 монеты".
+
+        Note this is only what the card advertises. Claiming also pays keys,
+        between one and five, which appear nowhere on the card — see
+        docs/game.md.
+        """
+        return " + ".join(f"{amount} {currency}" for currency, amount in self.reward)
 
     @property
     def on_cooldown(self) -> bool:
@@ -138,10 +161,32 @@ class QuestBot:
                     done=_number(progress.group(1)),
                     total=_number(progress.group(2)),
                     paid=bool(_PAID.search(description)),
+                    reward=self._reward(block),
                 )
             )
 
         return quests
+
+    @staticmethod
+    def _reward(block) -> tuple[tuple[str, int], ...]:
+        """Read what a task pays.
+
+        The amounts carry no label: the currency is only identifiable from the
+        icon beside each number.
+        """
+        holder = block.find("span", class_="amount")
+        if holder is None:
+            return ()
+
+        rewards: list[tuple[str, int]] = []
+        for part in holder.find_all("span", recursive=False):
+            image = part.find("img")
+            amount = _number(part.get_text(" ", strip=True))
+            if not amount:
+                continue
+            icon = (image.get("src", "").rsplit("/", 1)[-1].split(".")[0]) if image else ""
+            rewards.append((_CURRENCY.get(icon, icon or "?"), amount))
+        return tuple(rewards)
 
     @staticmethod
     def _description(block, title) -> str:
