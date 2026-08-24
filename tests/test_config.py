@@ -175,3 +175,16 @@ class TestUrl:
     def test_builds_absolute_urls(self, path):
         config = Config(username="u", password="p", base_url="https://nebo.mobi")
         assert config.url(path) == "https://nebo.mobi/home"
+
+
+class TestSpendingSwitches:
+    def test_paid_shortcuts_are_off_by_default(self, tmp_path):
+        assert config_module.load(write_config(tmp_path, VALID)).spend_baksy is False
+
+    def test_can_be_enabled_per_account(self, tmp_path):
+        assert config_module.load(
+            write_config(tmp_path, {**VALID, "spend_baksy": True})
+        ).spend_baksy is True
+
+    def test_city_announcements_are_hidden_by_default(self, tmp_path):
+        assert config_module.load(write_config(tmp_path, VALID)).hide_city_announcements is True

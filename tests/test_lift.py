@@ -57,3 +57,23 @@ class TestLinks:
         # "Улучшить лифт" links to /lobby and must never be pressed as a ride.
         url = make_bot().up_url(wicket.parse(lift_page), "https://nebo.mobi/lift")
         assert "lobby" not in url
+
+
+class TestAnnouncements:
+    PAGE = ('<div class="main"><a href="./lift?9-1.-guildMessage-guildMessageBlock-replyLink">ответить</a>'
+            '<a href="./lift?9-1.-guildMessage-guildMessageBlock-hideLink">скрыть</a></div>')
+
+    def test_dismisses_a_showing_banner(self):
+        bot = make_bot()
+        assert bot.hide_announcement(wicket.parse(self.PAGE), "https://nebo.mobi/lift") is True
+
+    def test_does_nothing_without_a_banner(self, lift_page):
+        bot = make_bot()
+        assert bot.hide_announcement(wicket.parse(lift_page), "https://nebo.mobi/lift") is False
+
+    def test_never_presses_reply(self):
+        # "ответить" posts to the city chat; only "скрыть" may be pressed.
+        urls = wicket.find_links_containing(
+            wicket.parse(self.PAGE), "guildMessageBlock-hideLink", "https://nebo.mobi/lift"
+        )
+        assert len(urls) == 1 and "hideLink" in urls[0]

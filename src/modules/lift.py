@@ -30,6 +30,8 @@ logger = logging.getLogger(__name__)
 
 _UP_COMPONENT = "liftState-upLink"
 _DELIVER_ALL_COMPONENT = "processLiftAll-link"
+# City announcements sit on top of the lift page with their own hide link.
+_HIDE_ANNOUNCEMENT_COMPONENT = "guildMessageBlock-hideLink"
 
 _FLOOR = re.compile(r"\[Этаж:\s*(\d+)\s*\]")
 _VISITORS = re.compile(r"Посетителей:\s*(\d+)")
@@ -102,6 +104,22 @@ class LiftBot:
         urls = wicket.find_links_containing(soup, _DELIVER_ALL_COMPONENT, page_url)
         return urls[0] if urls else None
 
+    def hide_announcement(self, soup: BeautifulSoup, page_url: str) -> bool:
+        """Dismiss the city announcement banner if one is showing.
+
+        Returns:
+            True if a banner was dismissed.
+        """
+        urls = wicket.find_links_containing(soup, _HIDE_ANNOUNCEMENT_COMPONENT, page_url)
+        if not urls:
+            return False
+
+        self.human.pause()
+        response = self.session.get(urls[0], timeout=self.config.timeout)
+        response.raise_for_status()
+        logger.info("Hid the city announcement")
+        return True
+
     def ride(self, max_presses: int, stop_when_tips_full: bool = True) -> int:
         """Raise the lift repeatedly, delivering whoever is waiting.
 
@@ -118,6 +136,10 @@ class LiftBot:
 
         while presses < max_presses:
             soup, page_url = self.fetch()
+
+            if self.config.hide_city_announcements and self.hide_announcement(soup, page_url):
+                soup, page_url = self.fetch()
+
             state = self.state(soup)
 
             if state.visitors == 0:
