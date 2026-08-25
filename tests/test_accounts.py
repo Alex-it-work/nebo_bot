@@ -133,39 +133,6 @@ class TestRoundsOverride:
         assert result.maze_rounds == 4 and result.delays.max_seconds == 1.5
 
 
-class TestLivePorts:
-    def test_one_watched_account_keeps_its_port(self):
-        from main import separate_live_ports
-
-        configs = [Config(username="A", password="p", live_view=True, live_port=8765)]
-        assert separate_live_ports(configs)[0].live_port == 8765
-
-    def test_two_watched_accounts_get_different_ports(self):
-        # Sharing a config means sharing a port, and the second bot to start
-        # would fail to bind.
-        from main import separate_live_ports
-
-        configs = [Config(username=n, password="p", live_view=True, live_port=8765)
-                   for n in ("A", "B", "C")]
-        ports = [c.live_port for c in separate_live_ports(configs)]
-        assert ports == [8765, 8766, 8767]
-
-    def test_unwatched_accounts_are_left_alone(self):
-        from main import separate_live_ports
-
-        configs = [Config(username="A", password="p", live_view=True, live_port=8765),
-                   Config(username="B", password="p", live_view=False, live_port=8765),
-                   Config(username="C", password="p", live_view=True, live_port=8765)]
-        result = separate_live_ports(configs)
-        assert [c.live_port for c in result] == [8765, 8765, 8766]
-
-    def test_nothing_changes_when_nobody_is_watched(self):
-        from main import separate_live_ports
-
-        configs = [Config(username="A", password="p"), Config(username="B", password="p")]
-        assert separate_live_ports(configs) == configs
-
-
 class TestParallelRun:
     def test_sequential_keeps_file_order(self, monkeypatch):
         import main as main_module

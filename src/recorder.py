@@ -44,8 +44,9 @@ class PageRecorder:
             base_url: Site root, injected as ``<base>`` so assets resolve.
             keep: How many pages to retain as history, or 0 for none.
             live: Also overwrite ``live.html`` with the newest page.
-            on_page: Called after each page is written, so a live view can be
-                told the moment there is something new rather than polling.
+            on_page: Called with ``(html, title)`` after each page, so a live
+                view is told the moment there is something new. The bot knows
+                when a page arrives, so nothing has to poll for it.
         """
         self.directory = Path(directory)
         self.base_url = base_url.rstrip("/") + "/"
@@ -77,10 +78,9 @@ class PageRecorder:
 
         html = self._prepare(response.text)
 
-        if self.live:
-            (self.directory / "live.html").write_text(html, encoding="utf-8")
-            if self.on_page is not None:
-                self.on_page()
+        if self.live and self.on_page is not None:
+            title = _TITLE.search(response.text)
+            self.on_page(html, title.group(1).strip() if title else response.url)
 
         if not self.keep:
             return self.directory / "live.html"

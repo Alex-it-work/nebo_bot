@@ -105,47 +105,38 @@ class TestWiring:
 
 
 class TestLiveView:
-    def test_writes_a_single_live_file(self, tmp_path):
-        recorder = PageRecorder(tmp_path, "https://nebo.mobi", keep=0, live=True)
-        for _ in range(5):
-            recorder.record(response(PAGE))
-        assert [p.name for p in tmp_path.iterdir()] == ["live.html"]
-
-    def test_announces_each_page_instead_of_being_polled(self, tmp_path):
+    def test_announces_each_page_with_its_title(self, tmp_path):
         # The bot knows when a page arrives; nothing should poll for it.
         seen = []
         recorder = PageRecorder(tmp_path, "https://nebo.mobi", keep=0, live=True,
-                                on_page=lambda: seen.append(1))
+                                on_page=lambda html, title: seen.append(title))
+        recorder.record(response(PAGE))
+        assert seen == ["Лабиринт"]
+
+    def test_announces_every_page(self, tmp_path):
+        seen = []
+        recorder = PageRecorder(tmp_path, "https://nebo.mobi", keep=0, live=True,
+                                on_page=lambda html, title: seen.append(title))
         for _ in range(3):
             recorder.record(response(PAGE))
         assert len(seen) == 3
 
-    def test_the_live_page_carries_no_timer(self, tmp_path):
-        PageRecorder(tmp_path, "https://nebo.mobi", keep=0, live=True).record(response(PAGE))
-        assert "http-equiv" not in (tmp_path / "live.html").read_text(encoding="utf-8")
+    def test_the_announced_page_carries_the_base_tag(self, tmp_path):
+        seen = []
+        recorder = PageRecorder(tmp_path, "https://nebo.mobi", keep=0, live=True,
+                                on_page=lambda html, title: seen.append(html))
+        recorder.record(response(PAGE))
+        assert '<base href="https://nebo.mobi/">' in seen[0]
+
+    def test_live_alone_writes_no_files(self, tmp_path):
+        recorder = PageRecorder(tmp_path, "https://nebo.mobi", keep=0, live=True,
+                                on_page=lambda html, title: None)
+        recorder.record(response(PAGE))
+        assert list(tmp_path.iterdir()) == []
 
     def test_history_alone_announces_nothing(self, tmp_path):
         seen = []
         recorder = PageRecorder(tmp_path, "https://nebo.mobi", keep=2, live=False,
-                                on_page=lambda: seen.append(1))
+                                on_page=lambda html, title: seen.append(1))
         recorder.record(response(PAGE))
         assert seen == []
-
-    def test_the_live_page_is_always_the_newest(self, tmp_path):
-        recorder = PageRecorder(tmp_path, "https://nebo.mobi", keep=0, live=True)
-        recorder.record(response("<html><head></head><body>первая</body></html>"))
-        recorder.record(response("<html><head></head><body>вторая</body></html>"))
-        html = (tmp_path / "live.html").read_text(encoding="utf-8")
-        assert "вторая" in html and "первая" not in html
-
-    def test_history_and_live_can_run_together(self, tmp_path):
-        recorder = PageRecorder(tmp_path, "https://nebo.mobi", keep=3, live=True)
-        for _ in range(4):
-            recorder.record(response(PAGE))
-        names = {p.name for p in tmp_path.iterdir()}
-        assert "live.html" in names and "index.html" in names and len(names) == 5
-
-    def test_history_alone_writes_no_live_file(self, tmp_path):
-        recorder = PageRecorder(tmp_path, "https://nebo.mobi", keep=2, live=False)
-        recorder.record(response(PAGE))
-        assert "live.html" not in {p.name for p in tmp_path.iterdir()}

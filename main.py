@@ -132,30 +132,6 @@ def apply_overrides(
     return [replace(config, **changes) for config in configs]
 
 
-def separate_live_ports(configs: list[Config]) -> list[Config]:
-    """Give every live view its own port.
-
-    Accounts share a configuration, so they share a port too, and the second
-    bot to start would fail to bind. Each one after the first is nudged up.
-    """
-    watched = [config for config in configs if config.live_view]
-    if len(watched) < 2:
-        return configs
-
-    taken: set[int] = set()
-    adjusted: list[Config] = []
-    for config in configs:
-        if not config.live_view:
-            adjusted.append(config)
-            continue
-        port = config.live_port
-        while port in taken:
-            port += 1
-        taken.add(port)
-        adjusted.append(config if port == config.live_port else replace(config, live_port=port))
-    return adjusted
-
-
 def run_all(configs: list[Config], login_only: bool, parallel: bool) -> dict[str, bool]:
     """Play every account, in order or all at once.
 
@@ -266,7 +242,7 @@ def main(argv: list[str] | None = None) -> int:
 
     results: dict[str, bool] = {}
     try:
-        results = run_all(separate_live_ports(configs), args.login_only, args.parallel)
+        results = run_all(configs, args.login_only, args.parallel)
     except KeyboardInterrupt:
         logger.info("Received shutdown signal")
         return 130
