@@ -19,7 +19,7 @@ import queue
 import threading
 from datetime import datetime
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
-from urllib.parse import unquote
+from urllib.parse import quote, unquote
 
 logger = logging.getLogger(__name__)
 
@@ -67,10 +67,10 @@ _OVERVIEW = """<!doctype html><meta charset="utf-8"><title>Боты играют
 
 _WATCH = """<!doctype html><meta charset="utf-8"><title>NAME</title>
 <style>STYLE</style>
-<header><span class="dot" id="dot"></span><a href="../">← все профили</a>
+<header><span class="dot" id="dot"></span><a href="/">← все профили</a>
 <b>NAME</b><span id="count">страниц: 0</span><span id="when"></span></header>
 <div class="stage">
- <iframe id="a" class="shown" src="page"></iframe>
+ <iframe id="a" class="shown" src="/watch/ENCNAME/page"></iframe>
  <iframe id="b"></iframe>
 </div>
 <script>
@@ -89,10 +89,10 @@ _WATCH = """<!doctype html><meta charset="utf-8"><title>NAME</title>
      frames[visible].className = '';
      visible = 1 - visible;
    };
-   hidden.src = 'page?' + version;
+   hidden.src = '/watch/ENCNAME/page?' + version;
  }
 
- var events = new EventSource('events');
+ var events = new EventSource('/watch/ENCNAME/events');
  events.onmessage = function (e) {
    show(e.data);
    count.textContent = 'страниц: ' + e.data;
@@ -234,8 +234,15 @@ class LiveServer:
                 elif parts == ["events"]:
                     self._stream(None, server._summary())
                 elif parts[0] == "watch" and len(parts) == 2:
-                    name = html_module.escape(parts[1])
-                    self._send(_WATCH.replace("STYLE", _STYLE).replace("NAME", name))
+                    # Relative URLs here resolved to /watch/page, which this
+                    # very route then served as an account called "page" —
+                    # the shell nesting inside itself. Absolute only.
+                    page = (
+                        _WATCH.replace("STYLE", _STYLE)
+                        .replace("ENCNAME", quote(parts[1], safe=""))
+                        .replace("NAME", html_module.escape(parts[1]))
+                    )
+                    self._send(page)
                 elif parts[0] == "watch" and len(parts) == 3 and parts[2] == "page":
                     channel = server.channels.get(parts[1])
                     self._send(channel.html if channel else WAITING)

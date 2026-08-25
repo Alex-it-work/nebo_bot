@@ -147,3 +147,24 @@ class TestLifecycle:
             assert second is not first
         finally:
             second.stop()
+
+
+class TestNoNesting:
+    def test_the_frame_points_at_an_absolute_page_url(self, server):
+        # A relative "page" resolved to /watch/page, which was then served as
+        # an account named "page": the shell rendered inside itself.
+        server.publish("Первый", "<p>x", "t")
+        page = get("watch/Первый", server)
+        assert 'src="/watch/%D0%9F%D0%B5%D1%80%D0%B2%D1%8B%D0%B9/page"' in page
+
+    def test_the_event_stream_is_absolute_too(self, server):
+        server.publish("Первый", "<p>x", "t")
+        assert "EventSource('/watch/" in get("watch/Первый", server)
+
+    def test_the_watch_page_is_not_served_inside_itself(self, server):
+        server.publish("Первый", "<p>x", "t")
+        assert "<iframe" not in get("watch/Первый/page", server)
+
+    def test_back_link_goes_to_the_root(self, server):
+        server.publish("Первый", "<p>x", "t")
+        assert 'href="/"' in get("watch/Первый", server)

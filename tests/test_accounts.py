@@ -141,7 +141,7 @@ class TestParallelRun:
         monkeypatch.setattr(main_module, "run_account",
                             lambda config, login_only: played.append(config.username) or True)
         configs = [Config(username=n, password="p") for n in ("A", "B", "C")]
-        result = main_module.run_all(configs, login_only=False, parallel=False)
+        result = main_module.run_all(configs, login_only=False, parallel=None)
         assert played == ["A", "B", "C"] and result == {"A": True, "B": True, "C": True}
 
     def test_parallel_reports_every_account(self, monkeypatch):
@@ -150,25 +150,87 @@ class TestParallelRun:
         monkeypatch.setattr(main_module, "run_account",
                             lambda config, login_only: config.username != "B")
         configs = [Config(username=n, password="p") for n in ("A", "B", "C")]
-        result = main_module.run_all(configs, login_only=False, parallel=True)
+        result = main_module.run_all(configs, login_only=False, parallel=3)
         assert result == {"A": True, "B": False, "C": True}
 
-    def test_parallel_actually_overlaps(self, monkeypatch):
+    def test_never_exceeds_the_limit(self, monkeypatch):
         import threading
         import time as time_module
 
         import main as main_module
 
-        started = threading.Barrier(3, timeout=5)
+        running = 0
+        peak = 0
+        lock = threading.Lock()
 
         def play(config, login_only):
-            # Times out unless all three are running at once.
-            started.wait()
-            time_module.sleep(0.01)
+            nonlocal running, peak
+            with lock:
+                running += 1
+                peak = max(peak, running)
+            time_module.sleep(0.05)
+            with lock:
+                running -= 1
             return True
 
         monkeypatch.setattr(main_module, "run_account", play)
+        configs = [Config(username=f"A{n}", password="p") for n in range(12)]
+        main_module.run_all(configs, login_only=False, parallel=3)
+        # Thirty sessions opening at once is a very different load than three.
+        assert peak <= 3
+
+    def test_a_limit_of_one_runs_them_in_order(self, monkeypatch):
+        import main as main_module
+
+        played = []
+        monkeypatch.setattr(main_module, "run_account",
+                            lambda config, login_only: played.append(config.username) or True)
         configs = [Config(username=n, password="p") for n in ("A", "B", "C")]
-        assert main_module.run_all(configs, login_only=False, parallel=True) == {
-            "A": True, "B": True, "C": True
-        }
+        main_module.run_all(configs, login_only=False, parallel=1)
+        assert played == ["A", "B", "C"]
+
+
+class TestPerAccountLogs:
+    def test_a_record_reaches_only_its_own_account(self):
+        import logging
+
+        from main import AccountFilter
+
+        record = logging.LogRecord("x", logging.INFO, "f", 1, "msg", None, None)
+        record.threadName = "Первый"
+        assert AccountFilter("Первый").filter(record) is True
+        assert AccountFilter("Второй").filter(record) is False
+
+    def test_awkward_names_become_usable_filenames(self):
+        from main import safe_filename
+
+        assert safe_filename("Super Allex") == "Super Allex"
+        assert safe_filename("сосочки") == "сосочки"
+        assert safe_filename("a/b:c*?") == "a_b_c_"
+
+    def test_punctuation_becomes_a_usable_name(self):
+        from main import safe_filename
+
+        assert safe_filename("///") == "_"
+
+    def test_an_empty_name_still_yields_a_file(self):
+        from main import safe_filename
+
+        assert safe_filename("   ") == "account"
+
+    def test_writes_one_file_per_account(self, tmp_path):
+        import logging
+
+        import main as main_module
+
+        config = Config(username="A", password="p", log_file=str(tmp_path / "bot.log"))
+        for handler in logging.root.handlers[:]:
+            logging.root.removeHandler(handler)
+        main_module.setup_logging(config, ["Первый", "Второй"])
+        try:
+            names = {p.name for p in tmp_path.iterdir()}
+            assert names == {"bot.log", "Первый.log", "Второй.log"}
+        finally:
+            for handler in logging.root.handlers[:]:
+                handler.close()
+                logging.root.removeHandler(handler)
