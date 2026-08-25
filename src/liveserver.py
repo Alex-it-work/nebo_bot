@@ -22,14 +22,20 @@ logger = logging.getLogger(__name__)
 
 SHELL = """<!doctype html><meta charset="utf-8"><title>Бот играет</title>
 <style>
- html,body{margin:0;height:100%;background:#111;color:#ddd;font:13px system-ui}
- header{display:flex;gap:1rem;align-items:center;padding:.4rem .8rem;background:#1b1b1b}
- #dot{width:.6rem;height:.6rem;border-radius:50%;background:#4c4;transition:background .3s}
+ /* The game's own palette, taken from its stylesheet: body #036 on #DDD text,
+    header #174577. Matching it means the shell disappears around the game
+    instead of framing it in something else. */
+ html,body{margin:0;height:100%;background:#036;color:#ddd;font:13px system-ui;
+           text-shadow:0 1px 5px black}
+ header{display:flex;gap:1rem;align-items:center;padding:.4rem .8rem;
+        background:#174577}
+ #dot{width:.6rem;height:.6rem;border-radius:50%;background:#6fcd72;
+      transition:background .3s}
  .stage{position:relative;height:calc(100% - 2rem)}
- /* Both frames sit on a dark ground: a frame paints its own background before
+ /* Both frames sit on the same blue: a frame paints its own background before
     the page inside it loads, and white there is what made it flash. */
  iframe{position:absolute;inset:0;border:0;width:100%;height:100%;
-        background:#111;opacity:0;transition:opacity .12s}
+        background:#036;opacity:0;transition:opacity .12s}
  iframe.shown{opacity:1}
 </style>
 <header><span id="dot"></span><span id="count">страниц: 0</span>
@@ -62,7 +68,7 @@ SHELL = """<!doctype html><meta charset="utf-8"><title>Бот играет</titl
    show(e.data);
    count.textContent = 'страниц: ' + e.data;
    when.textContent = new Date().toLocaleTimeString();
-   dot.style.background = '#4c4';
+   dot.style.background = '#6fcd72';
  };
  events.onerror = () => { dot.style.background = '#c44'; };
 </script>

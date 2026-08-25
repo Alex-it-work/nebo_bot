@@ -49,6 +49,10 @@ _DOOR_NUMBER = re.compile(rf"{_DOOR_COMPONENT}(\d+)")
 # Pauses after a dead end are stretched, as a person would hesitate on a reset.
 _SETBACK_MULTIPLIER = 1.5
 
+# A prize screen is worth looking at. Rushing past it in milliseconds is both
+# unlike a player and hides the one moment worth watching in the live view.
+_PRIZE_MULTIPLIER = 5
+
 # Steps allowed per attempt, as a multiple of the target room count.
 _STEP_BUDGET_FACTOR = 3
 
@@ -255,6 +259,7 @@ class MazeBot:
                 logger.info(
                     "Maze complete%s", f", reward: {' + '.join(reward)}" if reward else ""
                 )
+                self.human.pause(_PRIZE_MULTIPLIER)
                 return True
 
             if self.is_dead_end(soup):

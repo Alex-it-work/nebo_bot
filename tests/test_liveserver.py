@@ -78,3 +78,15 @@ class TestNoFlashing:
         page = get(server.url)
         styles = page.split("<style>")[1].split("</style>")[0]
         assert "#fff" not in styles.lower()
+
+
+class TestGamePalette:
+    def test_wears_the_games_own_blue(self, server):
+        # Taken from the game's stylesheet: body #036, header #174577.
+        styles = get(server.url).split("<style>")[1].split("</style>")[0]
+        assert "#036" in styles and "#174577" in styles
+
+    def test_the_frames_sit_on_that_blue_too(self, server):
+        styles = get(server.url).split("<style>")[1].split("</style>")[0]
+        frame_rule = styles.split("iframe{")[1].split("}")[0]
+        assert "#036" in frame_rule

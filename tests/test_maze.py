@@ -136,3 +136,17 @@ class TestBuyFinish:
 
     def test_buying_is_off_by_default(self):
         assert make_maze().config.buy_finish is False
+
+
+class TestSavouringAPrize:
+    def test_a_prize_screen_is_dwelt_on(self):
+        # Flashing past the prize in milliseconds is neither human nor
+        # watchable; the pause is what makes it visible in the live view.
+        from src.modules import maze as maze_module
+
+        assert maze_module._PRIZE_MULTIPLIER > maze_module._SETBACK_MULTIPLIER
+
+    def test_a_setback_is_dwelt_on_less_than_a_prize(self):
+        from src.modules import maze as maze_module
+
+        assert maze_module._SETBACK_MULTIPLIER > 1

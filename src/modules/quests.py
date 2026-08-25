@@ -54,6 +54,9 @@ _KEYS_EARNED = re.compile(r"Собрано\s+ключей:\s*([\d'’ ]+)")
 # Tasks asking for real money. The bot must never act on these.
 _PAID = re.compile(r"Пополни\s+счет", re.I)
 
+# How much longer to dwell on a reward screen than on an ordinary page.
+_REWARD_MULTIPLIER = 5
+
 
 def _number(text: str) -> int:
     """Read a count that may carry thousand separators."""
@@ -256,7 +259,9 @@ class QuestBot:
 
             reward = self._reward_message(wicket.parse(claimed.text))
             logger.info("Reward taken%s", f": {reward}" if reward else "")
-            self.human.pause_page_load()
+            # Linger on the reward as a player would, which also leaves it on
+            # screen long enough to be seen in the live view.
+            self.human.pause(_REWARD_MULTIPLIER)
 
         if taken:
             logger.info("Collected %d reward(s) from %s", taken, path)
