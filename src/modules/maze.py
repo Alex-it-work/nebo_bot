@@ -70,7 +70,7 @@ _KEYS_PATTERN = re.compile(r"Осталось\s+ключей:\s*(\d[\d'’ ]*)"
 
 
 class OutOfKeys(Exception):
-    """Raised when no keys remain, so retrying cannot help."""
+    """Raised when the keys are down to the floor, so playing on would eat it."""
 
 
 class MazeBot:
@@ -306,8 +306,13 @@ class MazeBot:
                 f", online: {online}" if online is not None else "",
             )
 
-            if keys == 0:
-                raise OutOfKeys("No keys left to open another door")
+            floor = self.config.min_keys
+            if keys is not None and keys <= floor:
+                raise OutOfKeys(
+                    f"Down to {keys} keys, at or below the floor of {floor}"
+                    if floor
+                    else "No keys left to open another door"
+                )
 
             doors = self.doors_by_number(soup, response.url)
             if not doors:

@@ -202,7 +202,7 @@ class TestBuyFinish:
 
 class TestWanderChance:
     def test_has_a_sensible_default(self, tmp_path):
-        assert config_module.load(write_config(tmp_path, VALID)).wander_chance == 0.12
+        assert config_module.load(write_config(tmp_path, VALID)).wander_chance == 0.04
 
     def test_can_be_turned_off(self, tmp_path):
         assert config_module.load(

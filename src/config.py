@@ -85,6 +85,9 @@ class Config:
         wander_chance: How often to glance at an unrelated page between
             actions. Costs nothing but a request, and breaks up the trail
             of a bot that only ever opens what it needs. 0 disables it.
+        min_keys: Never spend the maze below this many keys. 200 is the
+            price of the guaranteed finish, so keeping that much means the
+            option is always still on the table.
         buy_finish: Whether to buy the guaranteed maze finish offered at a
             dead end. Costs more keys than playing on average, but ends
             the run immediately.
@@ -114,7 +117,8 @@ class Config:
     maze_target_level: int = 10
     maze_rounds: int = 1
     maze_max_attempts: int = 0
-    wander_chance: float = 0.12
+    wander_chance: float = 0.04
+    min_keys: int = 200
     buy_finish: bool = False
     spend_baksy: bool = False
     hide_city_announcements: bool = True
@@ -270,7 +274,8 @@ def _from_mapping(raw: dict[str, Any], path: Path) -> Config:
         maze_target_level=int(_number(raw, "maze_target_level", 10)),
         maze_rounds=int(_number(raw, "maze_rounds", 1)),
         maze_max_attempts=int(_number(raw, "maze_max_attempts", 0)),
-        wander_chance=_check_chance(_number(raw, "wander_chance", 0.12), "wander_chance"),
+        wander_chance=_check_chance(_number(raw, "wander_chance", 0.04), "wander_chance"),
+        min_keys=int(_number(raw, "min_keys", 200)),
         buy_finish=bool(raw.get("buy_finish", False)),
         spend_baksy=bool(raw.get("spend_baksy", False)),
         hide_city_announcements=bool(raw.get("hide_city_announcements", True)),

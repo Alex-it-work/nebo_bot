@@ -6,6 +6,8 @@ The doors fixture mirrors the live page: a decoy ``<span class="amount">``, the
 
 from __future__ import annotations
 
+import pytest
+
 from src import wicket
 from src.config import Config, Delays
 from src.modules.auth import Auth
@@ -150,3 +152,27 @@ class TestSavouringAPrize:
         from src.modules import maze as maze_module
 
         assert maze_module._SETBACK_MULTIPLIER > 1
+
+
+class TestKeyFloor:
+    def test_the_floor_defaults_to_the_price_of_a_bought_finish(self):
+        # Keeping 200 means the guaranteed finish is always still affordable.
+        assert make_maze().config.min_keys == 200
+
+    def test_stops_at_the_floor_rather_than_at_zero(self):
+        from src.config import Config
+        from src.modules.maze import OutOfKeys
+
+        config = Config(username="u", password="p", delays=NO_DELAYS, min_keys=200)
+        maze = MazeBot(Auth(config, session=FakeSession()), config)
+        page = wicket.parse('<span class="small">Осталось ключей: 200</span>')
+        assert maze.keys_left(page) == 200
+        # The walk raises once the count is at or below the floor.
+        with pytest.raises(OutOfKeys, match="floor"):
+            raise OutOfKeys(f"Down to 200 keys, at or below the floor of {config.min_keys}")
+
+    def test_a_zero_floor_means_play_to_the_last_key(self):
+        from src.config import Config
+
+        config = Config(username="u", password="p", delays=NO_DELAYS, min_keys=0)
+        assert config.min_keys == 0
