@@ -7,6 +7,7 @@ import logging
 import requests
 
 from .. import wicket
+from ..liveserver import LiveServer
 from ..recorder import PageRecorder
 from ..config import Config
 from ..utils.human_like import HumanBehavior
@@ -51,6 +52,9 @@ class Auth:
         self.session.headers.update(_DEFAULT_HEADERS)
 
         self.recorder: PageRecorder | None = None
+        self.live: LiveServer | None = None
+        if config.live_view:
+            self.live = LiveServer(config.record_dir, config.live_port)
         if config.record_pages or config.live_view:
             # A response hook catches every page without each module knowing
             # that recording exists at all.
@@ -59,6 +63,7 @@ class Auth:
                 config.base_url,
                 keep=config.record_pages,
                 live=config.live_view,
+                on_page=self.live.notify if self.live else None,
             )
             self.session.hooks["response"].append(self.recorder.hook)
 

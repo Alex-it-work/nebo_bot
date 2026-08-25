@@ -64,6 +64,11 @@ hide_city_announcements: true
 record_pages: 0
 record_dir: "pages"
 
+# Смотреть, как бот играет, прямо в браузере: http://127.0.0.1:8765/
+# Страница обновляется в момент, когда бот получил новую, без опроса по таймеру.
+live_view: false
+live_port: 8765
+
 # Лабиринт
 maze_target_level: 10
 maze_max_attempts: 0 # 0 — без ограничения

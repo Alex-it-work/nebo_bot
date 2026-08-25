@@ -111,16 +111,25 @@ class TestLiveView:
             recorder.record(response(PAGE))
         assert [p.name for p in tmp_path.iterdir()] == ["live.html"]
 
-    def test_the_live_page_refreshes_itself(self, tmp_path):
-        PageRecorder(tmp_path, "https://nebo.mobi", keep=0, live=True).record(response(PAGE))
-        assert 'http-equiv="refresh"' in (tmp_path / "live.html").read_text(encoding="utf-8")
+    def test_announces_each_page_instead_of_being_polled(self, tmp_path):
+        # The bot knows when a page arrives; nothing should poll for it.
+        seen = []
+        recorder = PageRecorder(tmp_path, "https://nebo.mobi", keep=0, live=True,
+                                on_page=lambda: seen.append(1))
+        for _ in range(3):
+            recorder.record(response(PAGE))
+        assert len(seen) == 3
 
-    def test_the_refresh_names_no_url(self, tmp_path):
-        # A URL would resolve against <base> and send the browser to the game
-        # instead of reloading the local file.
+    def test_the_live_page_carries_no_timer(self, tmp_path):
         PageRecorder(tmp_path, "https://nebo.mobi", keep=0, live=True).record(response(PAGE))
-        html = (tmp_path / "live.html").read_text(encoding="utf-8")
-        assert 'content="1"' in html and "url=" not in html.split("<base")[0]
+        assert "http-equiv" not in (tmp_path / "live.html").read_text(encoding="utf-8")
+
+    def test_history_alone_announces_nothing(self, tmp_path):
+        seen = []
+        recorder = PageRecorder(tmp_path, "https://nebo.mobi", keep=2, live=False,
+                                on_page=lambda: seen.append(1))
+        recorder.record(response(PAGE))
+        assert seen == []
 
     def test_the_live_page_is_always_the_newest(self, tmp_path):
         recorder = PageRecorder(tmp_path, "https://nebo.mobi", keep=0, live=True)
