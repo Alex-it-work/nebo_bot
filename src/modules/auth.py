@@ -7,6 +7,7 @@ import logging
 import requests
 
 from .. import wicket
+from ..recorder import PageRecorder
 from ..config import Config
 from ..utils.human_like import HumanBehavior
 
@@ -45,8 +46,18 @@ class Auth:
         """
         self.config = config
         self.human = HumanBehavior(config.delays)
+
         self.session = session or requests.Session()
         self.session.headers.update(_DEFAULT_HEADERS)
+
+        self.recorder: PageRecorder | None = None
+        if config.record_pages:
+            # A response hook catches every page without each module knowing
+            # that recording exists at all.
+            self.recorder = PageRecorder(
+                config.record_dir, config.base_url, keep=config.record_pages
+            )
+            self.session.hooks["response"].append(self.recorder.hook)
 
     @property
     def base_url(self) -> str:

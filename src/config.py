@@ -85,6 +85,9 @@ class Config:
         spend_baksy: Whether paid shortcuts may be used. Worth it on a large
             profile, wasteful on a small one where the daily allowance is low.
         hide_city_announcements: Dismiss the city banner on the lift page.
+        record_pages: How many recent pages to keep for browsing, 0 to
+            record nothing.
+        record_dir: Where those pages are written.
         session_max_minutes: How long one run may play before stopping, 0 for
             no limit. A session that never ends is the least human thing a bot
             can do.
@@ -104,6 +107,8 @@ class Config:
     maze_max_attempts: int = 0
     spend_baksy: bool = False
     hide_city_announcements: bool = True
+    record_pages: int = 0
+    record_dir: str = "pages"
     session_max_minutes: int = 0
     active_hours: tuple[time, time] | None = None
 
@@ -254,6 +259,8 @@ def _from_mapping(raw: dict[str, Any], path: Path) -> Config:
         maze_max_attempts=int(_number(raw, "maze_max_attempts", 0)),
         spend_baksy=bool(raw.get("spend_baksy", False)),
         hide_city_announcements=bool(raw.get("hide_city_announcements", True)),
+        record_pages=int(_number(raw, "record_pages", 0)),
+        record_dir=str(raw.get("record_dir", "pages")),
         session_max_minutes=int(_number(raw, "session_max_minutes", 0)),
         active_hours=_active_hours(raw.get("active_hours")),
     )
