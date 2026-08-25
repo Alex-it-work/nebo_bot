@@ -102,3 +102,41 @@ class TestWiring:
                            record_dir=str(tmp_path)))
         assert auth.recorder is not None
         assert auth.recorder.hook in auth.session.hooks["response"]
+
+
+class TestLiveView:
+    def test_writes_a_single_live_file(self, tmp_path):
+        recorder = PageRecorder(tmp_path, "https://nebo.mobi", keep=0, live=True)
+        for _ in range(5):
+            recorder.record(response(PAGE))
+        assert [p.name for p in tmp_path.iterdir()] == ["live.html"]
+
+    def test_the_live_page_refreshes_itself(self, tmp_path):
+        PageRecorder(tmp_path, "https://nebo.mobi", keep=0, live=True).record(response(PAGE))
+        assert 'http-equiv="refresh"' in (tmp_path / "live.html").read_text(encoding="utf-8")
+
+    def test_the_refresh_names_no_url(self, tmp_path):
+        # A URL would resolve against <base> and send the browser to the game
+        # instead of reloading the local file.
+        PageRecorder(tmp_path, "https://nebo.mobi", keep=0, live=True).record(response(PAGE))
+        html = (tmp_path / "live.html").read_text(encoding="utf-8")
+        assert 'content="1"' in html and "url=" not in html.split("<base")[0]
+
+    def test_the_live_page_is_always_the_newest(self, tmp_path):
+        recorder = PageRecorder(tmp_path, "https://nebo.mobi", keep=0, live=True)
+        recorder.record(response("<html><head></head><body>первая</body></html>"))
+        recorder.record(response("<html><head></head><body>вторая</body></html>"))
+        html = (tmp_path / "live.html").read_text(encoding="utf-8")
+        assert "вторая" in html and "первая" not in html
+
+    def test_history_and_live_can_run_together(self, tmp_path):
+        recorder = PageRecorder(tmp_path, "https://nebo.mobi", keep=3, live=True)
+        for _ in range(4):
+            recorder.record(response(PAGE))
+        names = {p.name for p in tmp_path.iterdir()}
+        assert "live.html" in names and "index.html" in names and len(names) == 5
+
+    def test_history_alone_writes_no_live_file(self, tmp_path):
+        recorder = PageRecorder(tmp_path, "https://nebo.mobi", keep=2, live=False)
+        recorder.record(response(PAGE))
+        assert "live.html" not in {p.name for p in tmp_path.iterdir()}

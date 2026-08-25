@@ -88,6 +88,8 @@ class Config:
         record_pages: How many recent pages to keep for browsing, 0 to
             record nothing.
         record_dir: Where those pages are written.
+        live_view: Overwrite pages/live.html with the current page and
+            let it refresh itself, for watching the bot play.
         session_max_minutes: How long one run may play before stopping, 0 for
             no limit. A session that never ends is the least human thing a bot
             can do.
@@ -109,6 +111,7 @@ class Config:
     hide_city_announcements: bool = True
     record_pages: int = 0
     record_dir: str = "pages"
+    live_view: bool = False
     session_max_minutes: int = 0
     active_hours: tuple[time, time] | None = None
 
@@ -261,6 +264,7 @@ def _from_mapping(raw: dict[str, Any], path: Path) -> Config:
         hide_city_announcements=bool(raw.get("hide_city_announcements", True)),
         record_pages=int(_number(raw, "record_pages", 0)),
         record_dir=str(raw.get("record_dir", "pages")),
+        live_view=bool(raw.get("live_view", False)),
         session_max_minutes=int(_number(raw, "session_max_minutes", 0)),
         active_hours=_active_hours(raw.get("active_hours")),
     )

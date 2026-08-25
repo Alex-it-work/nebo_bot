@@ -51,11 +51,14 @@ class Auth:
         self.session.headers.update(_DEFAULT_HEADERS)
 
         self.recorder: PageRecorder | None = None
-        if config.record_pages:
+        if config.record_pages or config.live_view:
             # A response hook catches every page without each module knowing
             # that recording exists at all.
             self.recorder = PageRecorder(
-                config.record_dir, config.base_url, keep=config.record_pages
+                config.record_dir,
+                config.base_url,
+                keep=config.record_pages,
+                live=config.live_view,
             )
             self.session.hooks["response"].append(self.recorder.hook)
 
