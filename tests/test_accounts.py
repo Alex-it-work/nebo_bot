@@ -150,7 +150,7 @@ class TestParallelRun:
         monkeypatch.setattr(main_module, "run_account",
                             lambda config, login_only: config.username != "B")
         configs = [Config(username=n, password="p") for n in ("A", "B", "C")]
-        result = main_module.run_all(configs, login_only=False, parallel=3)
+        result = main_module.run_all(configs, login_only=False, parallel=3, stagger=0)
         assert result == {"A": True, "B": False, "C": True}
 
     def test_never_exceeds_the_limit(self, monkeypatch):
@@ -175,7 +175,7 @@ class TestParallelRun:
 
         monkeypatch.setattr(main_module, "run_account", play)
         configs = [Config(username=f"A{n}", password="p") for n in range(12)]
-        main_module.run_all(configs, login_only=False, parallel=3)
+        main_module.run_all(configs, login_only=False, parallel=3, stagger=0)
         # Thirty sessions opening at once is a very different load than three.
         assert peak <= 3
 
@@ -186,7 +186,7 @@ class TestParallelRun:
         monkeypatch.setattr(main_module, "run_account",
                             lambda config, login_only: played.append(config.username) or True)
         configs = [Config(username=n, password="p") for n in ("A", "B", "C")]
-        main_module.run_all(configs, login_only=False, parallel=1)
+        main_module.run_all(configs, login_only=False, parallel=1, stagger=0)
         assert played == ["A", "B", "C"]
 
 
@@ -234,3 +234,37 @@ class TestPerAccountLogs:
             for handler in logging.root.handlers[:]:
                 handler.close()
                 logging.root.removeHandler(handler)
+
+
+class TestHumanArrival:
+    def test_a_settle_pause_follows_login(self):
+        # Logging in and opening a maze door three seconds later is what a bot
+        # looks like; a player lands and takes the page in first.
+        from src import bot as bot_module
+
+        assert bot_module._SETTLE_MULTIPLIER > 1
+
+    def test_starts_are_staggered(self):
+        import main as main_module
+
+        assert main_module.STAGGER_SECONDS > 0
+
+    def test_parallel_does_not_release_everyone_at_once(self, monkeypatch):
+        import main as main_module
+
+        seen: list[float] = []
+        monkeypatch.setattr(main_module.time, "sleep", lambda s: seen.append(s))
+        monkeypatch.setattr(main_module, "run_account", lambda config, login_only: True)
+        configs = [Config(username=f"A{n}", password="p") for n in range(4)]
+        main_module.run_all(configs, login_only=False, parallel=4, stagger=0.3)
+        assert len(seen) == 4 and len(set(seen)) > 1
+
+    def test_starts_can_be_released_together_when_asked(self, monkeypatch):
+        import main as main_module
+
+        slept = []
+        monkeypatch.setattr(main_module.time, "sleep", lambda s: slept.append(s))
+        monkeypatch.setattr(main_module, "run_account", lambda config, login_only: True)
+        configs = [Config(username=f"A{n}", password="p") for n in range(3)]
+        main_module.run_all(configs, login_only=False, parallel=3, stagger=0)
+        assert slept == []

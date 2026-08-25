@@ -4,9 +4,11 @@ from __future__ import annotations
 
 import argparse
 import logging
+import random
 import re
 import sys
 import threading
+import time
 from dataclasses import replace
 from pathlib import Path
 
@@ -108,6 +110,9 @@ def select_accounts(configs: list[Config], wanted: list[str] | None) -> list[Con
 
 # Brisk pacing for a run the user is waiting on. Still spaced out, just not
 # padded with the long idle breaks that make an unattended run look casual.
+# Spread the moment each account starts, so a batch does not arrive in lockstep.
+STAGGER_SECONDS = 20.0
+
 FAST_DELAYS = Delays(
     min_seconds=0.6,
     max_seconds=1.5,
@@ -137,13 +142,20 @@ def apply_overrides(
     return [replace(config, **changes) for config in configs]
 
 
-def run_all(configs: list[Config], login_only: bool, parallel: int | None) -> dict[str, bool]:
+def run_all(
+    configs: list[Config],
+    login_only: bool,
+    parallel: int | None,
+    stagger: float = STAGGER_SECONDS,
+) -> dict[str, bool]:
     """Play every account, in order or several at a time.
 
     Args:
         configs: Accounts to play.
         login_only: Only check the login and stop.
         parallel: How many may run at once, or None for one after another.
+        stagger: Seconds to spread the starts over, so a batch does not sign
+            in in lockstep. Zero starts them together.
 
     Returns:
         Whether each account finished what it was asked to do.
@@ -166,6 +178,10 @@ def run_all(configs: list[Config], login_only: bool, parallel: int | None) -> di
 
     def play(config: Config) -> None:
         with permit:
+            # Accounts released together would sign in on the same second,
+            # which no set of separate players ever does.
+            if stagger:
+                time.sleep(random.uniform(0, stagger))
             outcome = run_account(config, login_only)
         with lock:
             outcomes[config.username] = outcome
@@ -293,6 +309,19 @@ def main(argv: list[str] | None = None) -> int:
 
     succeeded = sum(results.values())
     logger.info("Finished: %d of %d account(s) succeeded", succeeded, len(results))
+
+    if any(config.live_view for config in configs):
+        # The dashboard lives inside this process, so exiting would take it
+        # down at the exact moment there is a result worth looking at.
+        logger.info(
+            "Live view still up at http://127.0.0.1:%d/ — Ctrl+C to close",
+            configs[0].live_port,
+        )
+        try:
+            threading.Event().wait()
+        except KeyboardInterrupt:
+            logger.info("Closing the live view")
+
     return 0 if succeeded == len(results) else 1
 
 
