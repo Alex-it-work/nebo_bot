@@ -9,7 +9,7 @@ from dataclasses import replace
 from pathlib import Path
 
 from src.bot import NeboBot
-from src.config import Config, ConfigError
+from src.config import Config, ConfigError, Delays
 from src import config as config_module
 
 logger = logging.getLogger(__name__)
@@ -57,6 +57,12 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
         help="override how many mazes to complete for this run",
     )
     parser.add_argument(
+        "--fast",
+        action="store_true",
+        help="play at a brisk pace; measurement showed pace does not change the "
+             "maze odds, only how long the run takes",
+    )
+    parser.add_argument(
         "--list-accounts",
         action="store_true",
         help="print the configured accounts and exit",
@@ -89,13 +95,35 @@ def select_accounts(configs: list[Config], wanted: list[str] | None) -> list[Con
     return [config for config in configs if config.username in set(wanted)]
 
 
-def apply_overrides(configs: list[Config], rounds: int | None) -> list[Config]:
+# Brisk pacing for a run the user is waiting on. Still spaced out, just not
+# padded with the long idle breaks that make an unattended run look casual.
+FAST_DELAYS = Delays(
+    min_seconds=0.6,
+    max_seconds=1.5,
+    page_load_min=0.2,
+    page_load_max=0.5,
+    long_pause_chance=0.01,
+    long_pause_min=5,
+    long_pause_max=20,
+)
+
+
+def apply_overrides(
+    configs: list[Config], rounds: int | None, fast: bool = False
+) -> list[Config]:
     """Apply one-off command line overrides to every selected account."""
-    if rounds is None:
-        return configs
-    if rounds < 0:
+    if rounds is not None and rounds < 0:
         raise ConfigError("--rounds cannot be negative")
-    return [replace(config, maze_rounds=rounds) for config in configs]
+
+    changes: dict[str, object] = {}
+    if rounds is not None:
+        changes["maze_rounds"] = rounds
+    if fast:
+        changes["delays"] = FAST_DELAYS
+
+    if not changes:
+        return configs
+    return [replace(config, **changes) for config in configs]
 
 
 def run_account(config: Config, login_only: bool) -> bool:
@@ -156,7 +184,9 @@ def main(argv: list[str] | None = None) -> int:
     # Logging is not configured yet, so configuration errors go to stderr.
     try:
         configs = apply_overrides(
-            select_accounts(config_module.load_all(args.config), args.account), args.rounds
+            select_accounts(config_module.load_all(args.config), args.account),
+            args.rounds,
+            args.fast,
         )
     except ConfigError as exc:
         print(f"Configuration error: {exc}", file=sys.stderr)

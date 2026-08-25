@@ -117,3 +117,17 @@ class TestRoundsOverride:
     def test_rejects_a_negative_count(self):
         with pytest.raises(ConfigError, match="negative"):
             apply_overrides([Config(username="A", password="p")], -1)
+
+    def test_fast_replaces_the_delays(self):
+        from main import FAST_DELAYS
+
+        configs = [Config(username="A", password="p")]
+        assert apply_overrides(configs, None, fast=True)[0].delays == FAST_DELAYS
+
+    def test_normal_pace_is_left_alone(self):
+        original = Config(username="A", password="p")
+        assert apply_overrides([original], None, fast=False)[0].delays == original.delays
+
+    def test_rounds_and_pace_apply_together(self):
+        result = apply_overrides([Config(username="A", password="p")], 4, fast=True)[0]
+        assert result.maze_rounds == 4 and result.delays.max_seconds == 1.5
