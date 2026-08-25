@@ -82,6 +82,9 @@ class Config:
         maze_rounds: How many mazes to complete per run, 0 for as many as the
             keys and limits allow.
         maze_max_attempts: Maximum maze runs before giving up, 0 for unlimited.
+        buy_finish: Whether to buy the guaranteed maze finish offered at a
+            dead end. Costs more keys than playing on average, but ends
+            the run immediately.
         spend_baksy: Whether paid shortcuts may be used. Worth it on a large
             profile, wasteful on a small one where the daily allowance is low.
         hide_city_announcements: Dismiss the city banner on the lift page.
@@ -108,6 +111,7 @@ class Config:
     maze_target_level: int = 10
     maze_rounds: int = 1
     maze_max_attempts: int = 0
+    buy_finish: bool = False
     spend_baksy: bool = False
     hide_city_announcements: bool = True
     record_pages: int = 0
@@ -262,6 +266,7 @@ def _from_mapping(raw: dict[str, Any], path: Path) -> Config:
         maze_target_level=int(_number(raw, "maze_target_level", 10)),
         maze_rounds=int(_number(raw, "maze_rounds", 1)),
         maze_max_attempts=int(_number(raw, "maze_max_attempts", 0)),
+        buy_finish=bool(raw.get("buy_finish", False)),
         spend_baksy=bool(raw.get("spend_baksy", False)),
         hide_city_announcements=bool(raw.get("hide_city_announcements", True)),
         record_pages=int(_number(raw, "record_pages", 0)),

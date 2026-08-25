@@ -24,23 +24,45 @@ SHELL = """<!doctype html><meta charset="utf-8"><title>Бот играет</titl
 <style>
  html,body{margin:0;height:100%;background:#111;color:#ddd;font:13px system-ui}
  header{display:flex;gap:1rem;align-items:center;padding:.4rem .8rem;background:#1b1b1b}
- #dot{width:.6rem;height:.6rem;border-radius:50%;background:#4c4}
- iframe{border:0;width:100%;height:calc(100% - 2rem);background:#fff}
+ #dot{width:.6rem;height:.6rem;border-radius:50%;background:#4c4;transition:background .3s}
+ .stage{position:relative;height:calc(100% - 2rem)}
+ /* Both frames sit on a dark ground: a frame paints its own background before
+    the page inside it loads, and white there is what made it flash. */
+ iframe{position:absolute;inset:0;border:0;width:100%;height:100%;
+        background:#111;opacity:0;transition:opacity .12s}
+ iframe.shown{opacity:1}
 </style>
 <header><span id="dot"></span><span id="count">страниц: 0</span>
 <span id="when">ожидание…</span></header>
-<iframe id="view" src="page.html"></iframe>
+<div class="stage">
+ <iframe id="a" class="shown" src="page.html"></iframe>
+ <iframe id="b"></iframe>
+</div>
 <script>
- const view = document.getElementById('view');
+ const frames = [document.getElementById('a'), document.getElementById('b')];
  const count = document.getElementById('count');
  const when = document.getElementById('when');
  const dot = document.getElementById('dot');
+ let visible = 0;
+
+ // Double buffering: the incoming page loads out of sight and is revealed only
+ // once it has rendered, so nothing half-drawn is ever on screen.
+ function show(version) {
+   const hidden = frames[1 - visible];
+   hidden.onload = () => {
+     hidden.classList.add('shown');
+     frames[visible].classList.remove('shown');
+     visible = 1 - visible;
+   };
+   hidden.src = 'page.html?' + version;
+ }
+
  const events = new EventSource('events');
  events.onmessage = (e) => {
-   // A new page exists only now, so this is the moment to swap it in.
-   view.src = 'page.html?' + e.data;
+   show(e.data);
    count.textContent = 'страниц: ' + e.data;
    when.textContent = new Date().toLocaleTimeString();
+   dot.style.background = '#4c4';
  };
  events.onerror = () => { dot.style.background = '#c44'; };
 </script>

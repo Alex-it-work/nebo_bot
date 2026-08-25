@@ -56,6 +56,11 @@ _STEP_BUDGET_FACTOR = 3
 # its text: "Поздравляем! Вы прошли лабиринт!".
 _VICTORY_PATTERN = re.compile(r"прошли\s+лабиринт", re.I)
 
+# A dead end offers "Пройти за 200" — a guaranteed finish, paid in keys. The
+# price is read from the page rather than assumed.
+_BUY_FINISH_COMPONENT = "buyFinishLink"
+_BUY_PRICE = re.compile(r"Пройти\s+за\s*(\d[\d'’ ]*)")
+
 # "Осталось ключей: 1707" — the number may carry thousand separators.
 _KEYS_PATTERN = re.compile(r"Осталось\s+ключей:\s*(\d[\d'’ ]*)")
 
@@ -128,6 +133,23 @@ class MazeBot:
             for amount in label.find_all_next("span", class_="amount")
             if amount.get_text(strip=True)
         ][:2]
+
+    def buy_finish_offer(self, soup: BeautifulSoup, page_url: str) -> tuple[str, int] | None:
+        """Return the paid finish as ``(url, price_in_keys)``, if offered.
+
+        The game puts this on the dead-end screen: rather than starting over,
+        the run can be completed outright for a fixed number of keys.
+
+        Returns:
+            The link and its price, or None when not on offer.
+        """
+        urls = wicket.find_links_containing(soup, _BUY_FINISH_COMPONENT, page_url)
+        if not urls:
+            return None
+        price = _BUY_PRICE.search(soup.get_text(" ", strip=True))
+        if price is None:
+            return None
+        return urls[0], int(re.sub(r"\D", "", price.group(1)))
 
     def is_dead_end(self, soup: BeautifulSoup) -> bool:
         """Check whether the run ended in a dead end."""
@@ -237,9 +259,21 @@ class MazeBot:
 
             if self.is_dead_end(soup):
                 if pending:
-                    logger.info("Dead end behind room %d door %d, restarting", *pending)
+                    logger.info("Dead end behind room %d door %d", *pending)
                 else:
-                    logger.info("Dead end, restarting")
+                    logger.info("Dead end")
+
+                if self.config.buy_finish:
+                    offer = self.buy_finish_offer(soup, response.url)
+                    keys = self.keys_left(soup)
+                    if offer and (keys is None or keys >= offer[1]):
+                        url, price = offer
+                        logger.info("Buying the finish for %d keys", price)
+                        self.human.pause()
+                        bought = self._get(url)
+                        if self.is_solved(wicket.parse(bought.text)):
+                            return True
+                        logger.warning("Paid finish did not complete the maze")
                 return False
 
             level = self.current_level(soup)

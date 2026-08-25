@@ -188,3 +188,13 @@ class TestSpendingSwitches:
 
     def test_city_announcements_are_hidden_by_default(self, tmp_path):
         assert config_module.load(write_config(tmp_path, VALID)).hide_city_announcements is True
+
+
+class TestBuyFinish:
+    def test_off_by_default(self, tmp_path):
+        assert config_module.load(write_config(tmp_path, VALID)).buy_finish is False
+
+    def test_can_be_enabled_per_account(self, tmp_path):
+        assert config_module.load(
+            write_config(tmp_path, {**VALID, "buy_finish": True})
+        ).buy_finish is True

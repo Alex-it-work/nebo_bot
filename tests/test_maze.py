@@ -110,3 +110,29 @@ class TestDoorUrls:
 
     def test_returns_empty_when_there_are_no_doors(self, home_page):
         assert make_maze().door_urls(wicket.parse(home_page), "https://nebo.mobi/home") == []
+
+
+class TestBuyFinish:
+    def test_reads_the_offer_and_its_price(self, dead_end_page):
+        offer = make_maze().buy_finish_offer(wicket.parse(dead_end_page), "https://nebo.mobi/doors")
+        assert offer == ("https://nebo.mobi/doors?3-5.-buyFinishLink-link", 200)
+
+    def test_the_price_is_in_keys_not_baksy(self, dead_end_page):
+        # The icon beside the number is a key; paying in the wrong currency
+        # would be a very different decision.
+        assert "key.png" in dead_end_page
+
+    def test_no_offer_while_the_maze_is_still_running(self, doors_page):
+        assert make_maze().buy_finish_offer(wicket.parse(doors_page), "https://nebo.mobi/doors") is None
+
+    def test_no_offer_on_an_unrelated_page(self, home_page):
+        assert make_maze().buy_finish_offer(wicket.parse(home_page), "https://nebo.mobi/home") is None
+
+    def test_reads_the_price_from_the_page_rather_than_assuming(self):
+        page = ('<span class="notify">Вы попали в тупик!</span>'
+                '<a href="./doors?3-5.-buyFinishLink-link">Пройти за <span>350</span></a>')
+        offer = make_maze().buy_finish_offer(wicket.parse(page), "https://nebo.mobi/doors")
+        assert offer[1] == 350
+
+    def test_buying_is_off_by_default(self):
+        assert make_maze().config.buy_finish is False

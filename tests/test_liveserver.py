@@ -63,3 +63,18 @@ class TestLifecycle:
             assert "<iframe" in get(second.url)
         finally:
             second.stop()
+
+
+class TestNoFlashing:
+    def test_uses_two_frames_so_nothing_half_drawn_shows(self, server):
+        page = get(server.url)
+        assert page.count("<iframe") == 2
+
+    def test_reveals_a_frame_only_once_it_has_loaded(self, server):
+        assert "onload" in get(server.url)
+
+    def test_no_frame_paints_itself_white(self, server):
+        # A white frame background was what burned the eyes on every swap.
+        page = get(server.url)
+        styles = page.split("<style>")[1].split("</style>")[0]
+        assert "#fff" not in styles.lower()
