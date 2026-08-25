@@ -198,3 +198,18 @@ class TestBuyFinish:
         assert config_module.load(
             write_config(tmp_path, {**VALID, "buy_finish": True})
         ).buy_finish is True
+
+
+class TestWanderChance:
+    def test_has_a_sensible_default(self, tmp_path):
+        assert config_module.load(write_config(tmp_path, VALID)).wander_chance == 0.12
+
+    def test_can_be_turned_off(self, tmp_path):
+        assert config_module.load(
+            write_config(tmp_path, {**VALID, "wander_chance": 0})
+        ).wander_chance == 0
+
+    @pytest.mark.parametrize("value", [-0.1, 1.5])
+    def test_rejects_an_impossible_probability(self, tmp_path, value):
+        with pytest.raises(ConfigError, match="wander_chance"):
+            config_module.load(write_config(tmp_path, {**VALID, "wander_chance": value}))

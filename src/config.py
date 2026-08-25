@@ -82,6 +82,9 @@ class Config:
         maze_rounds: How many mazes to complete per run, 0 for as many as the
             keys and limits allow.
         maze_max_attempts: Maximum maze runs before giving up, 0 for unlimited.
+        wander_chance: How often to glance at an unrelated page between
+            actions. Costs nothing but a request, and breaks up the trail
+            of a bot that only ever opens what it needs. 0 disables it.
         buy_finish: Whether to buy the guaranteed maze finish offered at a
             dead end. Costs more keys than playing on average, but ends
             the run immediately.
@@ -111,6 +114,7 @@ class Config:
     maze_target_level: int = 10
     maze_rounds: int = 1
     maze_max_attempts: int = 0
+    wander_chance: float = 0.12
     buy_finish: bool = False
     spend_baksy: bool = False
     hide_city_announcements: bool = True
@@ -266,6 +270,7 @@ def _from_mapping(raw: dict[str, Any], path: Path) -> Config:
         maze_target_level=int(_number(raw, "maze_target_level", 10)),
         maze_rounds=int(_number(raw, "maze_rounds", 1)),
         maze_max_attempts=int(_number(raw, "maze_max_attempts", 0)),
+        wander_chance=_check_chance(_number(raw, "wander_chance", 0.12), "wander_chance"),
         buy_finish=bool(raw.get("buy_finish", False)),
         spend_baksy=bool(raw.get("spend_baksy", False)),
         hide_city_announcements=bool(raw.get("hide_city_announcements", True)),
@@ -276,6 +281,13 @@ def _from_mapping(raw: dict[str, Any], path: Path) -> Config:
         session_max_minutes=int(_number(raw, "session_max_minutes", 0)),
         active_hours=_active_hours(raw.get("active_hours")),
     )
+
+
+def _check_chance(value: float, name: str) -> float:
+    """Reject a probability outside 0..1."""
+    if not 0.0 <= value <= 1.0:
+        raise ConfigError(f"'{name}' must be between 0 and 1, got {value}")
+    return value
 
 
 def _active_hours(value: Any) -> tuple[time, time] | None:

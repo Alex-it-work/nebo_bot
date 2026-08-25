@@ -11,6 +11,7 @@ from ..liveserver import LiveServer
 from ..recorder import PageRecorder
 from ..config import Config
 from ..utils.human_like import HumanBehavior
+from ..utils.wandering import Wanderer
 
 logger = logging.getLogger(__name__)
 
@@ -47,10 +48,12 @@ class Auth:
         """
         self.config = config
         self.human = HumanBehavior(config.delays)
+        self.wanderer: Wanderer | None = None
 
         self.session = session or requests.Session()
         self.session.headers.update(_DEFAULT_HEADERS)
 
+        self.wanderer = Wanderer(self.session, config, self.human)
         self.recorder: PageRecorder | None = None
         self.live: LiveServer | None = None
         if config.live_view:

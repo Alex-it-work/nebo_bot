@@ -85,6 +85,7 @@ class MazeBot:
         """
         self.session = auth.session
         self.human = auth.human
+        self.wanderer = auth.wanderer
         self.config = config
 
     def keys_left(self, soup: BeautifulSoup) -> int | None:
@@ -232,6 +233,11 @@ class MazeBot:
                 logger.error("Attempt #%d failed: %s", attempt, exc)
 
             self.human.pause(_SETBACK_MULTIPLIER)
+            if self.wanderer is not None:
+                # Between attempts only: a glance elsewhere mid-maze would be
+                # odd, and this is where a player would drift off anyway.
+                self.wanderer.maybe_wander()
+                self.wanderer.maybe_wrong_turn()
 
         return completed
 

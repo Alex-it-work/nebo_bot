@@ -268,3 +268,23 @@ class TestHumanArrival:
         configs = [Config(username=f"A{n}", password="p") for n in range(3)]
         main_module.run_all(configs, login_only=False, parallel=3, stagger=0)
         assert slept == []
+
+
+class TestShuffledErrands:
+    def test_the_order_of_errands_varies(self, monkeypatch):
+        # Doing the same things in the same order every run is its own
+        # signature, whatever the timings look like.
+        from src.bot import NeboBot
+        from src.config import Config as C
+
+        orders = set()
+        for _ in range(30):
+            bot = NeboBot(C(username="u", password="p"))
+            done: list[str] = []
+            monkeypatch.setattr(bot, "_read_quests", lambda: done.append("quests"))
+            monkeypatch.setattr(bot.auth.wanderer, "maybe_wander", lambda: done.append("wander"))
+            monkeypatch.setattr(bot.auth, "is_authenticated", lambda: True)
+            monkeypatch.setattr(bot.maze, "solve", lambda: 0)
+            bot.run()
+            orders.add(tuple(done))
+        assert len(orders) > 1

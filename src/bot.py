@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import logging
+import random
 from pathlib import Path
 
 import requests
@@ -82,12 +83,12 @@ class NeboBot:
             logger.error("Cannot run features without an authenticated session")
             return False
 
-        # Keys come from the personal tasks, and the maze only spends them, so
-        # report that state before playing.
-        try:
-            self.quests.report()
-        except requests.RequestException as exc:
-            logger.warning("Could not read the task page: %s", exc)
+        # Same order every run is its own signature, so the errands that do
+        # not depend on each other are shuffled.
+        errands = [self._read_quests, self.auth.wanderer.maybe_wander]
+        random.shuffle(errands)
+        for errand in errands:
+            errand()
 
         completed = self.maze.solve()
         wanted = self.config.maze_rounds
@@ -96,6 +97,13 @@ class NeboBot:
             return completed >= wanted
         logger.info("Completed %d maze(s)", completed)
         return completed > 0
+
+    def _read_quests(self) -> None:
+        """Report the task page, forgiving a network hiccup."""
+        try:
+            self.quests.report()
+        except requests.RequestException as exc:
+            logger.warning("Could not read the task page: %s", exc)
 
     def stop(self) -> None:
         """Log out and release the session.
