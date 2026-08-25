@@ -5,6 +5,7 @@ from __future__ import annotations
 import argparse
 import logging
 import sys
+import threading
 from dataclasses import replace
 from pathlib import Path
 
@@ -14,7 +15,7 @@ from src import config as config_module
 
 logger = logging.getLogger(__name__)
 
-_LOG_FORMAT = "%(asctime)s - %(name)s - %(levelname)s - %(message)s"
+_LOG_FORMAT = "%(asctime)s - %(threadName)s - %(levelname)s - %(message)s"
 
 
 def force_utf8_output() -> None:
@@ -61,6 +62,11 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
         action="store_true",
         help="play at a brisk pace; measurement showed pace does not change the "
              "maze odds, only how long the run takes",
+    )
+    parser.add_argument(
+        "--parallel",
+        action="store_true",
+        help="run the selected accounts at the same time instead of one after another",
     )
     parser.add_argument(
         "--list-accounts",
@@ -124,6 +130,63 @@ def apply_overrides(
     if not changes:
         return configs
     return [replace(config, **changes) for config in configs]
+
+
+def separate_live_ports(configs: list[Config]) -> list[Config]:
+    """Give every live view its own port.
+
+    Accounts share a configuration, so they share a port too, and the second
+    bot to start would fail to bind. Each one after the first is nudged up.
+    """
+    watched = [config for config in configs if config.live_view]
+    if len(watched) < 2:
+        return configs
+
+    taken: set[int] = set()
+    adjusted: list[Config] = []
+    for config in configs:
+        if not config.live_view:
+            adjusted.append(config)
+            continue
+        port = config.live_port
+        while port in taken:
+            port += 1
+        taken.add(port)
+        adjusted.append(config if port == config.live_port else replace(config, live_port=port))
+    return adjusted
+
+
+def run_all(configs: list[Config], login_only: bool, parallel: bool) -> dict[str, bool]:
+    """Play every account, in order or all at once.
+
+    Returns:
+        Whether each account finished what it was asked to do.
+    """
+    if not parallel:
+        results: dict[str, bool] = {}
+        for position, config in enumerate(configs, start=1):
+            logger.info("Account %d of %d", position, len(configs))
+            results[config.username] = run_account(config, login_only)
+        return results
+
+    logger.info("Running %d account(s) at once", len(configs))
+    outcomes: dict[str, bool] = {}
+    lock = threading.Lock()
+
+    def play(config: Config) -> None:
+        outcome = run_account(config, login_only)
+        with lock:
+            outcomes[config.username] = outcome
+
+    threads = [
+        threading.Thread(target=play, args=(config,), name=config.username, daemon=True)
+        for config in configs
+    ]
+    for thread in threads:
+        thread.start()
+    for thread in threads:
+        thread.join()
+    return outcomes
 
 
 def run_account(config: Config, login_only: bool) -> bool:
@@ -203,9 +266,7 @@ def main(argv: list[str] | None = None) -> int:
 
     results: dict[str, bool] = {}
     try:
-        for position, config in enumerate(configs, start=1):
-            logger.info("Account %d of %d", position, len(configs))
-            results[config.username] = run_account(config, args.login_only)
+        results = run_all(separate_live_ports(configs), args.login_only, args.parallel)
     except KeyboardInterrupt:
         logger.info("Received shutdown signal")
         return 130
