@@ -39,6 +39,7 @@ python main.py
 
 ```bash
 python main.py --login-only          # только проверить вход
+python main.py --collect             # забрать созревшие награды и выйти
 python main.py --config path/to.yml  # другой конфиг
 ```
 

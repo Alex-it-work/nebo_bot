@@ -9,6 +9,7 @@ from pathlib import Path
 import requests
 
 from . import config as config_module
+from . import wicket
 from .config import Config
 from .modules.auth import Auth
 from .modules.maze import MazeBot
@@ -88,6 +89,39 @@ class NeboBot:
             return completed >= wanted
         logger.info("Completed %d maze(s)", completed)
         return completed > 0
+
+    def collect(self) -> int:
+        """Take every reward waiting on the task and marathon pages.
+
+        Keys arrive here without ever being named on a card, so the count is
+        read before and after and the difference reported.
+
+        Returns:
+            How many rewards were taken.
+        """
+        before = self._keys()
+        taken = 0
+        for page in ("/quests", "/tasks"):
+            try:
+                taken += self.quests.claim_all(page)
+            except requests.RequestException as exc:
+                logger.warning("Could not collect from %s: %s", page, exc)
+
+        after = self._keys()
+        if taken and before is not None and after is not None:
+            logger.info("Collected %d reward(s), keys %d -> %d (%+d)",
+                        taken, before, after, after - before)
+        return taken
+
+    def _keys(self) -> int | None:
+        """Read the current key count, forgiving a network hiccup."""
+        try:
+            response = self.auth.session.get(
+                self.config.url("/doors"), timeout=self.config.timeout
+            )
+            return self.maze.keys_left(wicket.parse(response.text))
+        except requests.RequestException:
+            return None
 
     def _read_quests(self) -> None:
         """Report the task page, forgiving a network hiccup."""

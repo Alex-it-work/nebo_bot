@@ -57,6 +57,9 @@ _PAID = re.compile(r"Пополни\s+счет", re.I)
 # How much longer to dwell on a reward screen than on an ordinary page.
 _REWARD_MULTIPLIER = 5
 
+# And how long to look at the page before reaching for the reward at all.
+_BEFORE_CLAIM_MULTIPLIER = 3
+
 
 def _number(text: str) -> int:
     """Read a count that may carry thousand separators."""
@@ -252,7 +255,8 @@ class QuestBot:
             if not urls:
                 break
 
-            self.human.pause()
+            # Read the page before taking anything, as a player would.
+            self.human.pause(_BEFORE_CLAIM_MULTIPLIER)
             claimed = self.session.get(urls[0], timeout=self.config.timeout)
             claimed.raise_for_status()
             taken += 1

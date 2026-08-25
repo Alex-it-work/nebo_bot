@@ -90,11 +90,12 @@ class TestWrongTurns:
         assert wanderer.maybe_wrong_turn() is False
         assert session.urls == []
 
-    def test_is_rarer_than_ordinary_wandering(self):
-        # People misclick, but not constantly.
+    def test_is_much_rarer_than_ordinary_wandering(self):
+        # A misclick is an event, not a habit: a third of the wander rate was
+        # still frequent enough to be noticed while watching.
         wanderer, _ = make_wanderer(chance=0.3)
-        turns = sum(wanderer.maybe_wrong_turn() for _ in range(400))
-        assert turns < 400 * 0.3
+        turns = sum(wanderer.maybe_wrong_turn() for _ in range(600))
+        assert turns < 600 * 0.3 / 5
 
 
 class TestFrequency:

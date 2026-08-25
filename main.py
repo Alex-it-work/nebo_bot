@@ -61,6 +61,11 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
         help="override how many mazes to complete for this run",
     )
     parser.add_argument(
+        "--collect",
+        action="store_true",
+        help="take every reward waiting and stop, without playing",
+    )
+    parser.add_argument(
         "--fast",
         action="store_true",
         help="play at a brisk pace; measurement showed pace does not change the "
@@ -147,6 +152,7 @@ def run_all(
     login_only: bool,
     parallel: int | None,
     stagger: float = STAGGER_SECONDS,
+    collect_only: bool = False,
 ) -> dict[str, bool]:
     """Play every account, in order or several at a time.
 
@@ -164,7 +170,7 @@ def run_all(
         results: dict[str, bool] = {}
         for position, config in enumerate(configs, start=1):
             logger.info("Account %d of %d", position, len(configs))
-            results[config.username] = run_account(config, login_only)
+            results[config.username] = run_account(config, login_only, collect_only)
         return results
 
     at_once = min(parallel, len(configs))
@@ -182,7 +188,7 @@ def run_all(
             # which no set of separate players ever does.
             if stagger:
                 time.sleep(random.uniform(0, stagger))
-            outcome = run_account(config, login_only)
+            outcome = run_account(config, login_only, collect_only)
         with lock:
             outcomes[config.username] = outcome
 
@@ -197,7 +203,7 @@ def run_all(
     return outcomes
 
 
-def run_account(config: Config, login_only: bool) -> bool:
+def run_account(config: Config, login_only: bool, collect_only: bool = False) -> bool:
     """Play one account from login to logout.
 
     Failures are contained here: with thirty accounts queued, one broken login
@@ -214,6 +220,9 @@ def run_account(config: Config, login_only: bool) -> bool:
             return False
         if login_only:
             logger.info("%s: login check succeeded", config.username)
+            return True
+        if collect_only:
+            bot.collect()
             return True
         return bot.run()
     except KeyboardInterrupt:
@@ -297,7 +306,7 @@ def main(argv: list[str] | None = None) -> int:
 
     results: dict[str, bool] = {}
     try:
-        results = run_all(configs, args.login_only, args.parallel)
+        results = run_all(configs, args.login_only, args.parallel, collect_only=args.collect)
     except KeyboardInterrupt:
         logger.info("Received shutdown signal")
         return 130

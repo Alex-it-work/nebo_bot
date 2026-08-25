@@ -139,7 +139,7 @@ class TestParallelRun:
 
         played = []
         monkeypatch.setattr(main_module, "run_account",
-                            lambda config, login_only: played.append(config.username) or True)
+                            lambda config, login_only, collect_only=False: played.append(config.username) or True)
         configs = [Config(username=n, password="p") for n in ("A", "B", "C")]
         result = main_module.run_all(configs, login_only=False, parallel=None)
         assert played == ["A", "B", "C"] and result == {"A": True, "B": True, "C": True}
@@ -148,7 +148,7 @@ class TestParallelRun:
         import main as main_module
 
         monkeypatch.setattr(main_module, "run_account",
-                            lambda config, login_only: config.username != "B")
+                            lambda config, login_only, collect_only=False: config.username != "B")
         configs = [Config(username=n, password="p") for n in ("A", "B", "C")]
         result = main_module.run_all(configs, login_only=False, parallel=3, stagger=0)
         assert result == {"A": True, "B": False, "C": True}
@@ -163,7 +163,7 @@ class TestParallelRun:
         peak = 0
         lock = threading.Lock()
 
-        def play(config, login_only):
+        def play(config, login_only, collect_only=False):
             nonlocal running, peak
             with lock:
                 running += 1
@@ -184,7 +184,7 @@ class TestParallelRun:
 
         played = []
         monkeypatch.setattr(main_module, "run_account",
-                            lambda config, login_only: played.append(config.username) or True)
+                            lambda config, login_only, collect_only=False: played.append(config.username) or True)
         configs = [Config(username=n, password="p") for n in ("A", "B", "C")]
         main_module.run_all(configs, login_only=False, parallel=1, stagger=0)
         assert played == ["A", "B", "C"]
@@ -274,7 +274,7 @@ class TestHumanArrival:
 
         seen: list[float] = []
         monkeypatch.setattr(main_module.time, "sleep", lambda s: seen.append(s))
-        monkeypatch.setattr(main_module, "run_account", lambda config, login_only: True)
+        monkeypatch.setattr(main_module, "run_account", lambda config, login_only, collect_only=False: True)
         configs = [Config(username=f"A{n}", password="p") for n in range(4)]
         main_module.run_all(configs, login_only=False, parallel=4, stagger=0.3)
         assert len(seen) == 4 and len(set(seen)) > 1
@@ -284,7 +284,7 @@ class TestHumanArrival:
 
         slept = []
         monkeypatch.setattr(main_module.time, "sleep", lambda s: slept.append(s))
-        monkeypatch.setattr(main_module, "run_account", lambda config, login_only: True)
+        monkeypatch.setattr(main_module, "run_account", lambda config, login_only, collect_only=False: True)
         configs = [Config(username=f"A{n}", password="p") for n in range(3)]
         main_module.run_all(configs, login_only=False, parallel=3, stagger=0)
         assert slept == []
@@ -308,3 +308,64 @@ class TestShuffledErrands:
             bot.run()
             orders.add(tuple(done))
         assert len(orders) > 1
+
+
+class TestCollecting:
+    def test_collect_takes_rewards_without_playing(self, monkeypatch):
+        from src.bot import NeboBot
+        from src.config import Config as C
+
+        bot = NeboBot(C(username="u", password="p"))
+        played = []
+        monkeypatch.setattr(bot.maze, "solve", lambda *a, **k: played.append("maze") or 0)
+        monkeypatch.setattr(bot.quests, "claim_all", lambda page: 1)
+        monkeypatch.setattr(bot, "_keys", lambda: 100)
+        assert bot.collect() == 2
+        assert played == []
+
+    def test_collects_from_both_task_pages(self, monkeypatch):
+        # Personal tasks and the marathon are separate pages with separate
+        # rewards, and the marathon pays keys too.
+        from src.bot import NeboBot
+        from src.config import Config as C
+
+        bot = NeboBot(C(username="u", password="p"))
+        pages = []
+        monkeypatch.setattr(bot.quests, "claim_all", lambda page: pages.append(page) or 0)
+        monkeypatch.setattr(bot, "_keys", lambda: 0)
+        bot.collect()
+        assert pages == ["/quests", "/tasks"]
+
+    def test_reports_the_keys_that_arrived(self, monkeypatch, caplog):
+        import logging
+
+        from src.bot import NeboBot
+        from src.config import Config as C
+
+        bot = NeboBot(C(username="u", password="p"))
+        counts = iter([800, 855])
+        monkeypatch.setattr(bot.quests, "claim_all", lambda page: 1)
+        monkeypatch.setattr(bot, "_keys", lambda: next(counts))
+        with caplog.at_level(logging.INFO):
+            bot.collect()
+        assert "+55" in caplog.text
+
+    def test_a_network_failure_does_not_stop_the_other_page(self, monkeypatch):
+        import requests as requests_module
+
+        from src.bot import NeboBot
+        from src.config import Config as C
+
+        bot = NeboBot(C(username="u", password="p"))
+        seen = []
+
+        def claim(page):
+            seen.append(page)
+            if page == "/quests":
+                raise requests_module.ConnectionError("down")
+            return 1
+
+        monkeypatch.setattr(bot.quests, "claim_all", claim)
+        monkeypatch.setattr(bot, "_keys", lambda: 0)
+        assert bot.collect() == 1
+        assert seen == ["/quests", "/tasks"]

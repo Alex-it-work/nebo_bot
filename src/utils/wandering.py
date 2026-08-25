@@ -88,8 +88,9 @@ class Wanderer:
         """
         if not self.config.wander_chance:
             return False
-        # Rarer than ordinary wandering; people misclick, but not constantly.
-        if random.random() >= self.config.wander_chance / 3:
+        # Much rarer than ordinary wandering: a misclick is an event, not a
+        # habit, and at a third of the wander rate it still read as one.
+        if random.random() >= self.config.wander_chance / 10:
             return False
 
         if not self._open(random.choice(_GLANCE_PAGES)):
