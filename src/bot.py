@@ -17,10 +17,6 @@ from .utils.human_like import within_active_hours
 
 logger = logging.getLogger(__name__)
 
-# Arriving and immediately opening a maze door is not what arriving looks like.
-# A player lands on the home page and takes it in first.
-_SETTLE_MULTIPLIER = 4
-
 
 class NeboBot:
     """Runs the enabled features against an authenticated session.
@@ -51,18 +47,13 @@ class NeboBot:
         logger.debug("Bot initialised for %s", self.config.base_url)
 
     def start(self) -> bool:
-        """Authenticate, then take a moment before doing anything.
+        """Authenticate.
 
         Returns:
             True if the session is ready for use.
         """
         logger.info("Starting bot")
-        if not self.auth.login():
-            return False
-
-        # Land, look around, then start playing.
-        self.auth.human.pause(_SETTLE_MULTIPLIER)
-        return True
+        return self.auth.login()
 
     def run(self) -> bool:
         """Run the enabled features once.

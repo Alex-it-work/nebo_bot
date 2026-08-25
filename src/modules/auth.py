@@ -15,6 +15,11 @@ from ..utils.wandering import Wanderer
 
 logger = logging.getLogger(__name__)
 
+# Arriving and acting in the same breath is not what arriving looks like: a
+# player lands on the home page and takes it in first. This belongs here rather
+# than in a caller, because every caller logs in.
+_SETTLE_MULTIPLIER = 4
+
 # Sent on every request so the session looks like an ordinary mobile browser
 # visiting a WAP-oriented site.
 _DEFAULT_HEADERS = {
@@ -115,6 +120,7 @@ class Auth:
 
             if self.is_authenticated():
                 logger.info("Authenticated successfully")
+                self.human.pause(_SETTLE_MULTIPLIER)
                 return True
 
             # Not authenticated: surface whatever the server complained about.

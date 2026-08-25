@@ -237,12 +237,32 @@ class TestPerAccountLogs:
 
 
 class TestHumanArrival:
-    def test_a_settle_pause_follows_login(self):
-        # Logging in and opening a maze door three seconds later is what a bot
-        # looks like; a player lands and takes the page in first.
-        from src import bot as bot_module
+    def test_a_settle_pause_belongs_to_logging_in(self):
+        # It lived in the NeboBot wrapper, so anything calling Auth.login()
+        # directly went straight from arriving to playing in three seconds.
+        from src.modules import auth as auth_module
 
-        assert bot_module._SETTLE_MULTIPLIER > 1
+        assert auth_module._SETTLE_MULTIPLIER > 1
+
+    def test_logging_in_pauses_before_returning(self, monkeypatch, login_page):
+        from src.config import Config as C, Delays
+        from src.modules.auth import Auth
+        from tests.test_auth import FakeResponse, FakeSession
+
+        no_delays = Delays(min_seconds=0, max_seconds=0, page_load_min=0, page_load_max=0)
+        session = FakeSession(
+            get_responses={
+                "/login": FakeResponse(login_page, url="https://nebo.mobi/login"),
+                "/home": FakeResponse(url="https://nebo.mobi/home", status_code=200),
+            }
+        )
+        auth = Auth(C(username="u", password="p", delays=no_delays), session=session)
+        paused: list[float] = []
+        monkeypatch.setattr(auth.human, "pause", lambda m=1.0: paused.append(m))
+
+        assert auth.login() is True
+        # A long pause before returning, not just the ordinary ones.
+        assert max(paused) > 1
 
     def test_starts_are_staggered(self):
         import main as main_module
