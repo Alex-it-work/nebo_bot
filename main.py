@@ -221,8 +221,8 @@ def run_panel(configs: list[Config], at_once: int) -> int:
     server = LiveServer.shared(configs[0].live_port)
     server.attach(Controller(configs, at_once=at_once, stagger=STAGGER_SECONDS))
 
-    logger.info("Панель управления: %s", server.url)
-    logger.info("Профилей: %d. Ctrl+C чтобы закрыть.", len(configs))
+    logger.info("Control panel at %s", server.url)
+    logger.info("%d account(s) ready. Ctrl+C to close.", len(configs))
     try:
         webbrowser.open(server.url)
     except Exception:  # noqa: BLE001 - opening a browser is a convenience
@@ -231,7 +231,7 @@ def run_panel(configs: list[Config], at_once: int) -> int:
     try:
         threading.Event().wait()
     except KeyboardInterrupt:
-        logger.info("Закрываю панель")
+        logger.info("Closing the panel")
     return 0
 
 
