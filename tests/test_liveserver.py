@@ -190,6 +190,18 @@ class FakeController:
     def rounds_for(self, account):
         return 1
 
+    def settings_for(self, account):
+        return {"maze_rounds": 1, "min_keys": 200, "active_hours": "",
+                "spend_baksy": False, "fast": False}
+
+    def remove_account(self, account):
+        self.removed = account
+        return ""
+
+    def update_account(self, account, values):
+        self.updated = (account, values)
+        return ""
+
     def start(self, account, action, rounds=None):
         self.started.append((account, action))
         self.rounds = rounds
@@ -332,3 +344,25 @@ class TestFormParsing:
         from src.liveserver import _form_fields
 
         assert _form_fields("") == {}
+
+
+class TestRowButtonsAreClickable:
+    def test_created_buttons_are_not_submit_buttons(self, server):
+        # createElement('button') defaults to type="submit", and the click
+        # handler ignores submit buttons — every row button went inert.
+        server.attach(FakeController())
+        assert "element.type = 'button'" in get("", server)
+
+    def test_the_handler_skips_only_buttons_inside_forms(self, server):
+        server.attach(FakeController())
+        page = get("", server)
+        assert "button.closest('form')" in page and "button.type === 'submit'" not in page
+
+    def test_settings_and_remove_are_offered_per_row(self, server):
+        server.attach(FakeController())
+        page = get("", server)
+        assert "'Настройки'" in page and "'Удалить'" in page
+
+    def test_removal_asks_first(self, server):
+        server.attach(FakeController())
+        assert "confirm(" in get("", server)

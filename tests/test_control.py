@@ -228,3 +228,105 @@ class TestAddingAccounts:
     def test_rounds_are_reported_per_account(self):
         controller = Controller([Config(username="A", password="p", maze_rounds=4)], stagger=0)
         assert controller.rounds_for("A") == 4
+
+
+class TestRemovingAccounts:
+    def _controller(self, tmp_path, names=("Первый", "Второй")):
+        import yaml
+
+        path = tmp_path / "c.yml"
+        path.write_text(yaml.safe_dump(
+            {"defaults": {}, "accounts": [{"username": n, "password": "p"} for n in names]},
+            allow_unicode=True), encoding="utf-8")
+        configs = [Config(username=n, password="p") for n in names]
+        return Controller(configs, stagger=0, config_path=str(path)), path
+
+    def test_removes_from_the_file_and_the_table(self, tmp_path):
+        import yaml
+
+        controller, path = self._controller(tmp_path)
+        assert controller.remove_account("Второй") == ""
+        assert controller.names() == ["Первый"]
+        saved = yaml.safe_load(path.read_text(encoding="utf-8"))
+        assert [a["username"] for a in saved["accounts"]] == ["Первый"]
+
+    def test_refuses_an_unknown_account(self, tmp_path):
+        controller, _ = self._controller(tmp_path)
+        assert "нет такого" in controller.remove_account("Нетакого")
+
+    def test_refuses_while_the_account_is_working(self, tmp_path, monkeypatch):
+        import src.control as control_module
+
+        controller, _ = self._controller(tmp_path)
+        monkeypatch.setattr(control_module, "NeboBot", _SlowBot)
+        controller.start("Первый", "check")
+        assert "работает" in controller.remove_account("Первый")
+
+    def test_leaves_the_others_alone(self, tmp_path):
+        import yaml
+
+        controller, path = self._controller(tmp_path, ("A", "B", "C"))
+        controller.remove_account("B")
+        saved = yaml.safe_load(path.read_text(encoding="utf-8"))
+        assert [a["username"] for a in saved["accounts"]] == ["A", "C"]
+
+
+class TestEditingSettings:
+    def _controller(self, tmp_path, **account):
+        import yaml
+
+        from src import config as config_module
+
+        path = tmp_path / "c.yml"
+        entry = {"username": "A", "password": "p", **account}
+        path.write_text(yaml.safe_dump({"defaults": {}, "accounts": [entry]},
+                                       allow_unicode=True), encoding="utf-8")
+        # Read the accounts back from the file, as the panel does on startup.
+        return Controller(config_module.load_all(path), stagger=0,
+                          config_path=str(path)), path
+
+    def test_reports_the_current_values(self, tmp_path):
+        controller, _ = self._controller(tmp_path, maze_rounds=3, min_keys=500)
+        settings = controller.settings_for("A")
+        assert settings["maze_rounds"] == 3 and settings["min_keys"] == 500
+
+    def test_saves_numbers(self, tmp_path):
+        controller, path = self._controller(tmp_path)
+        assert controller.update_account("A", {"maze_rounds": "5", "min_keys": "300"}) == ""
+        assert controller.configs["A"].maze_rounds == 5
+        assert controller.configs["A"].min_keys == 300
+
+    def test_rejects_a_number_that_is_not_one(self, tmp_path):
+        controller, _ = self._controller(tmp_path)
+        assert "целое число" in controller.update_account("A", {"maze_rounds": "много"})
+
+    def test_saves_a_checkbox(self, tmp_path):
+        controller, _ = self._controller(tmp_path)
+        controller.update_account("A", {"spend_baksy": "on"})
+        assert controller.configs["A"].spend_baksy is True
+        controller.update_account("A", {"spend_baksy": "off"})
+        assert controller.configs["A"].spend_baksy is False
+
+    def test_fast_is_a_shorthand_for_the_whole_pacing(self, tmp_path):
+        # The panel offers one switch rather than four numbers.
+        controller, _ = self._controller(tmp_path)
+        controller.update_account("A", {"fast": "on"})
+        assert controller.configs["A"].delays.max_seconds <= 2
+        controller.update_account("A", {"fast": "off"})
+        assert controller.configs["A"].delays.max_seconds > 2
+
+    def test_saves_active_hours(self, tmp_path):
+        controller, _ = self._controller(tmp_path)
+        assert controller.update_account("A", {"active_hours": "09:00-23:30"}) == ""
+        assert controller.configs["A"].active_hours is not None
+
+    def test_a_bad_window_is_refused_without_breaking_the_file(self, tmp_path):
+        controller, path = self._controller(tmp_path)
+        assert controller.update_account("A", {"active_hours": "не время"}) != ""
+        # The account still loads afterwards.
+        assert controller.settings_for("A")["maze_rounds"] == 1
+
+    def test_untouched_settings_stay_put(self, tmp_path):
+        controller, _ = self._controller(tmp_path, min_keys=400)
+        controller.update_account("A", {"maze_rounds": "2"})
+        assert controller.configs["A"].min_keys == 400

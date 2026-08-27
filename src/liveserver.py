@@ -46,6 +46,12 @@ _STYLE = """
         margin-right:.3rem;cursor:pointer;color:#fff}
  .go{background:#285688}.go:hover{background:#4775a7}
  .stop{background:#8a3a3a}.stop:hover{background:#a94a4a}
+ .plain{background:#4775a7}.plain:hover{background:#5b8bc0}
+ .settings{display:flex;gap:1rem;align-items:center;flex-wrap:wrap;
+           padding:.6rem;background:#043264;border-radius:.4rem}
+ .settings label{display:flex;gap:.4rem;align-items:center;white-space:nowrap}
+ .settings input[type=text]{width:9rem}
+ .settings input[type=checkbox]{width:auto}
  input{font:inherit;width:4rem;padding:.2rem .3rem;border:1px solid #4775a7;
        border-radius:.25rem;background:#043264;color:#ddd}
  .add input{width:11rem}
@@ -100,7 +106,8 @@ _OVERVIEW = """<!doctype html><meta charset="utf-8"><title>Боты играют
  // is exactly how the table came up empty while the server had six accounts.
  document.addEventListener('click', function (event) {
    var button = event.target.closest('button');
-   if (!button || button.type === 'submit') return;
+   // Forms handle their own submit buttons; everything else is ours.
+   if (!button || button.closest('form')) return;
 
    var everyone = button.dataset.all;
    if (everyone === 'stop') return void post('stop-all');
@@ -114,9 +121,21 @@ _OVERVIEW = """<!doctype html><meta charset="utf-8"><title>Боты играют
 
    var row = button.closest('tr');
    if (!row || !button.dataset.do) return;
-   var name = encodeURIComponent(row.dataset.name);
-   if (button.dataset.do === 'stop') return void post('stop/' + name);
-   post('run/' + name + '/' + button.dataset.do + '?rounds=' + roundsOf(row));
+   var plain = row.dataset.name;
+   var name = encodeURIComponent(plain);
+   var what = button.dataset.do;
+
+   if (what === 'stop') return void post('stop/' + name);
+   if (what === 'settings') {
+     open_settings = (open_settings === plain) ? null : plain;
+     return void draw(last_state);
+   }
+   if (what === 'remove') {
+     if (!confirm('Удалить профиль ' + plain + '? Настройки для него сотрутся.')) return;
+     return void post('remove/' + name).then(function (r) { return r.text(); })
+       .then(function (text) { if (text !== 'удалён') alert(text); });
+   }
+   post('run/' + name + '/' + what + '?rounds=' + roundsOf(row));
  });
 
  function roundsOf(row) {
@@ -136,6 +155,61 @@ _OVERVIEW = """<!doctype html><meta charset="utf-8"><title>Боты играют
    });
  });
 
+ var open_settings = null;
+ var last_state = [];
+
+ function field(form, key, label, value, type) {
+   var wrap = document.createElement('label');
+   wrap.textContent = label + ' ';
+   var input = document.createElement('input');
+   input.name = key;
+   input.type = type;
+   if (type === 'checkbox') input.checked = !!value; else input.value = value;
+   wrap.appendChild(input);
+   form.appendChild(wrap);
+ }
+
+ function settingsRow(account) {
+   var row = document.createElement('tr');
+   var cellHolder = document.createElement('td');
+   cellHolder.colSpan = 6;
+
+   var form = document.createElement('form');
+   form.className = 'settings';
+   var settings = account.settings || {};
+   field(form, 'maze_rounds', 'Кругов за запуск', settings.maze_rounds, 'number');
+   field(form, 'min_keys', 'Не тратить ключи ниже', settings.min_keys, 'number');
+   field(form, 'active_hours', 'Часы работы (09:00-23:30)', settings.active_hours || '', 'text');
+   field(form, 'spend_baksy', 'Тратить баксы на ускорения', settings.spend_baksy, 'checkbox');
+   field(form, 'fast', 'Быстрый темп', settings.fast, 'checkbox');
+
+   var save = document.createElement('button');
+   save.className = 'go';
+   save.type = 'submit';
+   save.textContent = 'Сохранить';
+   form.appendChild(save);
+
+   var note = document.createElement('span');
+   form.appendChild(note);
+
+   form.addEventListener('submit', function (event) {
+     event.preventDefault();
+     note.textContent = 'сохраняю…';
+     var data = new FormData();
+     form.querySelectorAll('input').forEach(function (input) {
+       data.append(input.name, input.type === 'checkbox'
+         ? (input.checked ? 'on' : 'off') : input.value);
+     });
+     post('settings/' + encodeURIComponent(account.name), data)
+       .then(function (r) { return r.text(); })
+       .then(function (text) { note.textContent = text; });
+   });
+
+   cellHolder.appendChild(form);
+   row.appendChild(cellHolder);
+   return row;
+ }
+
  function cell(text) {
    var td = document.createElement('td');
    td.textContent = text;
@@ -144,6 +218,9 @@ _OVERVIEW = """<!doctype html><meta charset="utf-8"><title>Боты играют
 
  function button(label, kind, action) {
    var element = document.createElement('button');
+   // A created button defaults to type="submit", which the click handler
+   // deliberately ignores; without this every row button was inert.
+   element.type = 'button';
    element.className = kind;
    element.dataset.do = action;
    element.textContent = label;
@@ -151,6 +228,7 @@ _OVERVIEW = """<!doctype html><meta charset="utf-8"><title>Боты играют
  }
 
  function draw(state) {
+   last_state = state;
    document.getElementById('n').textContent = state.length;
    document.getElementById('when').textContent = new Date().toLocaleTimeString();
    var focused = document.activeElement;
@@ -183,9 +261,12 @@ _OVERVIEW = """<!doctype html><meta charset="utf-8"><title>Боты играют
      actions.appendChild(button('Лабиринт', 'go', 'maze'));
      actions.appendChild(button('Награды', 'go', 'collect'));
      actions.appendChild(button('Стоп', 'stop', 'stop'));
+     actions.appendChild(button('Настройки', 'plain', 'settings'));
+     actions.appendChild(button('Удалить', 'stop', 'remove'));
      row.appendChild(actions);
 
      rows.appendChild(row);
+     if (open_settings === account.name) rows.appendChild(settingsRow(account));
    });
  }
 
@@ -374,6 +455,7 @@ class LiveServer:
                         self.controller.status(c.name) if self.controller else ""
                     ),
                     "rounds": self.controller.rounds_for(c.name) if self.controller else 1,
+                    "settings": self.controller.settings_for(c.name) if self.controller else {},
                 }
                 for c in self.channels.values()
             ],
@@ -407,6 +489,11 @@ class LiveServer:
                     self._send("<p>Управление недоступно", status=503)
                 elif parts == ["add"]:
                     self._add()
+                elif len(parts) == 2 and parts[0] == "remove":
+                    problem = server.controller.remove_account(parts[1])
+                    self._send(problem or "удалён", status=400 if problem else 200)
+                elif len(parts) == 2 and parts[0] == "settings":
+                    self._settings(parts[1])
                 elif parts == ["stop-all"]:
                     stopped = server.controller.stop_all()
                     self._send(f"<p>Остановлено: {stopped}")
@@ -465,6 +552,13 @@ class LiveServer:
                     return
                 server.channel(fields["username"].strip())
                 self._send("добавлен")
+
+            def _settings(self, account: str):
+                """Save the settings form for one account."""
+                length = int(self.headers.get("Content-Length") or 0)
+                body = self.rfile.read(length).decode("utf-8", "replace")
+                problem = server.controller.update_account(account, _form_fields(body))
+                self._send(problem or "сохранено", status=400 if problem else 200)
 
             def _send(self, body: str, status: int = 200):
                 encoded = body.encode("utf-8")

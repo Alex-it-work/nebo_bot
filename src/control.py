@@ -137,6 +137,122 @@ class Controller:
         logger.info("Added account %s from the panel", username)
         return ""
 
+    # What the panel may change, with the label it shows and how to read it.
+    EDITABLE = {
+        "maze_rounds": ("Кругов за запуск", int),
+        "min_keys": ("Не тратить ключи ниже", int),
+        "active_hours": ("Часы работы", str),
+        "spend_baksy": ("Тратить баксы на ускорения", bool),
+        "fast": ("Быстрый темп", bool),
+    }
+
+    def settings_for(self, account: str) -> dict[str, object]:
+        """Current values of everything the panel may change."""
+        config = self.configs.get(account)
+        if config is None:
+            return {}
+        start, end = config.active_hours or (None, None)
+        return {
+            "maze_rounds": config.maze_rounds,
+            "min_keys": config.min_keys,
+            "active_hours": f"{start:%H:%M}-{end:%H:%M}" if start else "",
+            "spend_baksy": config.spend_baksy,
+            "fast": config.delays.max_seconds <= 2,
+        }
+
+    def update_account(self, account: str, values: dict[str, str]) -> str:
+        """Save changed settings for one account.
+
+        Returns:
+            An empty string on success, or why it was refused.
+        """
+        if account not in self.configs:
+            return "нет такого профиля"
+        if self.config_path is None:
+            return "не задан файл настроек"
+
+        changes: dict[str, object] = {}
+        for key, (label, kind) in self.EDITABLE.items():
+            if key not in values:
+                continue
+            raw = values[key].strip()
+            if kind is bool:
+                changes[key] = raw in ("on", "true", "1", "да")
+            elif kind is int:
+                if not raw.isdigit():
+                    return f"«{label}» — нужно целое число"
+                changes[key] = int(raw)
+            else:
+                changes[key] = raw
+
+        return self._write_account(account, changes)
+
+    def _write_account(self, account: str, changes: dict[str, object]) -> str:
+        """Apply changes to one account in the configuration file."""
+        path = pathlib.Path(self.config_path)
+        try:
+            raw = yaml.safe_load(path.read_text(encoding="utf-8")) or {}
+        except (OSError, yaml.YAMLError) as exc:
+            return f"не читается файл настроек: {exc}"
+
+        entries = raw.get("accounts") or []
+        entry = next((e for e in entries if e.get("username") == account), None)
+        if entry is None:
+            return "профиль не найден в файле"
+
+        # "fast" is a shorthand the panel offers rather than a setting of its
+        # own: it stands for the whole pacing envelope.
+        if "fast" in changes:
+            if changes.pop("fast"):
+                entry.update(delay_min=0.6, delay_max=1.5, long_pause_chance=0.01)
+            else:
+                entry.update(delay_min=1.5, delay_max=3.5, long_pause_chance=0.04)
+        entry.update(changes)
+
+        try:
+            path.write_text(
+                yaml.safe_dump(raw, allow_unicode=True, sort_keys=False), encoding="utf-8"
+            )
+            updated = [c for c in config_module.load_all(path) if c.username == account]
+        except (OSError, ConfigError, yaml.YAMLError) as exc:
+            return f"не сохранилось: {exc}"
+
+        if not updated:
+            return "профиль не перечитался"
+        self.configs[account] = updated[0]
+        logger.info("Updated settings for %s from the panel", account)
+        return ""
+
+    def remove_account(self, account: str) -> str:
+        """Remove an account from the configuration file.
+
+        Returns:
+            An empty string on success, or why it was refused.
+        """
+        if account not in self.configs:
+            return "нет такого профиля"
+        job = self.jobs.get(account)
+        if job is not None and job.running:
+            return "профиль сейчас работает, сначала остановите"
+        if self.config_path is None:
+            return "не задан файл настроек"
+
+        path = pathlib.Path(self.config_path)
+        try:
+            raw = yaml.safe_load(path.read_text(encoding="utf-8")) or {}
+            entries = raw.get("accounts") or []
+            raw["accounts"] = [e for e in entries if e.get("username") != account]
+            path.write_text(
+                yaml.safe_dump(raw, allow_unicode=True, sort_keys=False), encoding="utf-8"
+            )
+        except (OSError, yaml.YAMLError) as exc:
+            return f"не сохранилось: {exc}"
+
+        self.configs.pop(account, None)
+        self.jobs.pop(account, None)
+        logger.info("Removed account %s from the panel", account)
+        return ""
+
     def start(self, account: str, action: str, rounds: int | None = None) -> bool:
         """Begin an action for one account.
 
