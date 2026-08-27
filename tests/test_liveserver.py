@@ -259,3 +259,27 @@ class TestControls:
         with pytest.raises(urllib.error.HTTPError) as raised:
             post("nonsense", server)
         assert raised.value.code == 404
+
+
+class TestPanelScript:
+    def test_no_inline_handlers(self, server):
+        # Concatenating handler attributes nested quotes three deep; one stray
+        # quote was a syntax error that killed the script and left the table
+        # empty while the server had six accounts.
+        server.attach(FakeController())
+        assert 'onclick="' not in get("", server)
+
+    def test_rows_and_buttons_are_built_as_elements(self, server):
+        server.attach(FakeController())
+        page = get("", server)
+        assert "createElement" in page and "textContent" in page
+
+    def test_actions_travel_as_data_attributes(self, server):
+        server.attach(FakeController())
+        page = get("", server)
+        assert "dataset.do" in page and "dataset.name" in page
+
+    def test_account_names_are_never_pasted_into_html(self, server):
+        # textContent rather than innerHTML, so a name cannot become markup.
+        server.attach(FakeController())
+        assert "innerHTML" not in get("", server)

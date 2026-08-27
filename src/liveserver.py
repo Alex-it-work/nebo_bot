@@ -51,9 +51,9 @@ _OVERVIEW = """<!doctype html><meta charset="utf-8"><title>Боты играют
 <style>STYLE</style>
 <header><span class="dot" id="dot"></span><span>Профилей: <b id="n">0</b></span>
 <span id="when">ожидание…</span>
-<button class="go" onclick="allAccounts('maze')">Лабиринт всем</button>
-<button class="go" onclick="allAccounts('collect')">Забрать всё</button>
-<button class="stop" onclick="post('stop-all')">Стоп</button></header>
+<button class="go" data-all="maze">Лабиринт всем</button>
+<button class="go" data-all="collect">Забрать всё</button>
+<button class="stop" data-all="stop">Стоп</button></header>
 <main><table><thead><tr><th>Профиль<th>Занят<th>Страница<th>Событие<th>Действия
 </tr></thead><tbody id="rows"></tbody></table></main>
 <script>
@@ -62,30 +62,72 @@ _OVERVIEW = """<!doctype html><meta charset="utf-8"><title>Боты играют
  function post(path) {
    return fetch(path, {method: 'POST'});
  }
- function run(name, action) {
-   post('run/' + encodeURIComponent(name) + '/' + action);
+
+ // One listener for the whole page rather than inline handlers. Building
+ // handler attributes by string concatenation nests three levels of quotes,
+ // and getting one wrong is a syntax error that kills the whole script — which
+ // is exactly how the table came up empty while the server had six accounts.
+ document.addEventListener('click', function (event) {
+   var button = event.target.closest('button');
+   if (!button) return;
+
+   var everyone = button.dataset.all;
+   if (everyone === 'stop') return void post('stop-all');
+   if (everyone) {
+     document.querySelectorAll('tr[data-name]').forEach(function (row) {
+       post('run/' + encodeURIComponent(row.dataset.name) + '/' + everyone);
+     });
+     return;
+   }
+
+   var row = button.closest('tr');
+   if (!row || !button.dataset.do) return;
+   var name = encodeURIComponent(row.dataset.name);
+   post(button.dataset.do === 'stop' ? 'stop/' + name
+                                     : 'run/' + name + '/' + button.dataset.do);
+ });
+
+ function cell(text) {
+   var td = document.createElement('td');
+   td.textContent = text;
+   return td;
  }
- function allAccounts(action) {
-   var names = Array.prototype.map.call(
-     document.querySelectorAll('tr[data-name]'),
-     function (row) { return row.getAttribute('data-name'); });
-   names.forEach(function (n) { run(n, action); });
+
+ function button(label, kind, action) {
+   var element = document.createElement('button');
+   element.className = kind;
+   element.dataset.do = action;
+   element.textContent = label;
+   return element;
  }
 
  function draw(state) {
    document.getElementById('n').textContent = state.length;
    document.getElementById('when').textContent = new Date().toLocaleTimeString();
-   rows.innerHTML = state.map(function (a) {
-     var name = a.name.replace(/"/g, '&quot;');
-     var buttons =
-       '<button class="go" onclick="run(this.closest('tr').dataset.name,'maze')">Лабиринт</button>' +
-       '<button class="go" onclick="run(this.closest('tr').dataset.name,'collect')">Награды</button>' +
-       '<button class="stop" onclick="post('stop/'+encodeURIComponent(this.closest('tr').dataset.name))">Стоп</button>';
-     return '<tr data-name="' + name + '"><td><a href="watch/' +
-            encodeURIComponent(a.name) + '">' + a.name + '</a>' +
-            '<td>' + (a.busy || '—') + '<td>' + a.title + '<td>' + a.when +
-            '<td>' + buttons;
-   }).join('');
+   rows.replaceChildren();
+   state.forEach(function (account) {
+     var row = document.createElement('tr');
+     row.dataset.name = account.name;
+
+     var first = document.createElement('td');
+     var link = document.createElement('a');
+     link.href = 'watch/' + encodeURIComponent(account.name);
+     link.textContent = account.name;
+     first.appendChild(link);
+     row.appendChild(first);
+
+     row.appendChild(cell(account.busy || '—'));
+     row.appendChild(cell(account.title));
+     row.appendChild(cell(account.when));
+
+     var actions = document.createElement('td');
+     actions.appendChild(button('Лабиринт', 'go', 'maze'));
+     actions.appendChild(button('Награды', 'go', 'collect'));
+     actions.appendChild(button('Стоп', 'stop', 'stop'));
+     row.appendChild(actions);
+
+     rows.appendChild(row);
+   });
  }
 
  var events = new EventSource('events');
