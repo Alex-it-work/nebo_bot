@@ -176,3 +176,33 @@ class TestKeyFloor:
 
         config = Config(username="u", password="p", delays=NO_DELAYS, min_keys=0)
         assert config.min_keys == 0
+
+
+class TestCollectingBetweenMazes:
+    def test_a_hook_runs_after_each_finished_maze(self):
+        # Clearing a tier mid-run leaves a reward waiting, and until it is
+        # taken the next tier never appears — so the remaining mazes would be
+        # played for nothing.
+        maze = make_maze()
+        calls = []
+        maze._walk = lambda target: True
+        maze.human.pause = lambda multiplier=1.0: None
+        done = maze.solve(rounds=3, on_complete=lambda: calls.append(1))
+        assert done == 3 and len(calls) == 3
+
+    def test_nothing_is_called_when_no_maze_finishes(self):
+        maze = make_maze()
+        calls = []
+        attempts = []
+        maze._walk = lambda target: attempts.append(1) is None and False
+        maze.human.pause = lambda multiplier=1.0: None
+        # Stop after a couple of failed attempts so the loop cannot run away.
+        maze.solve(rounds=1, should_stop=lambda: len(attempts) >= 2,
+                   on_complete=lambda: calls.append(1))
+        assert calls == []
+
+    def test_the_hook_is_optional(self):
+        maze = make_maze()
+        maze._walk = lambda target: True
+        maze.human.pause = lambda multiplier=1.0: None
+        assert maze.solve(rounds=1) == 1

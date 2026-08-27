@@ -143,6 +143,13 @@ _OVERVIEW = """<!doctype html><meta charset="utf-8"><title>Боты играют
    return field ? field.value : '';
  }
 
+ document.addEventListener('input', function (event) {
+   var field = event.target;
+   if (field.type !== 'number') return;
+   var row = field.closest('tr[data-name]');
+   if (row) chosen_rounds[row.dataset.name] = field.value;
+ });
+
  document.getElementById('add').addEventListener('submit', function (event) {
    event.preventDefault();
    var note = document.getElementById('added');
@@ -157,6 +164,9 @@ _OVERVIEW = """<!doctype html><meta charset="utf-8"><title>Боты играют
 
  var open_settings = null;
  var last_state = [];
+ // The table is rebuilt on every event; without remembering what was typed,
+ // the number would snap back to the saved one and look like it was ignored.
+ var chosen_rounds = {};
 
  function field(form, key, label, value, type) {
    var wrap = document.createElement('label');
@@ -232,6 +242,10 @@ _OVERVIEW = """<!doctype html><meta charset="utf-8"><title>Боты играют
    document.getElementById('n').textContent = state.length;
    document.getElementById('when').textContent = new Date().toLocaleTimeString();
    var focused = document.activeElement;
+   var focusedRow = focused && focused.closest
+     ? focused.closest('tr[data-name]')
+     : null;
+   var focusedName = focusedRow ? focusedRow.dataset.name : null;
    rows.replaceChildren();
    state.forEach(function (account) {
      var row = document.createElement('tr');
@@ -252,7 +266,9 @@ _OVERVIEW = """<!doctype html><meta charset="utf-8"><title>Боты играют
      var rounds = document.createElement('input');
      rounds.type = 'number';
      rounds.min = '1';
-     rounds.value = account.rounds;
+     rounds.value = chosen_rounds[account.name] !== undefined
+       ? chosen_rounds[account.name]
+       : account.rounds;
      rounds.title = 'Сколько лабиринтов пройти за один запуск';
      roundsCell.appendChild(rounds);
      row.appendChild(roundsCell);
@@ -267,6 +283,10 @@ _OVERVIEW = """<!doctype html><meta charset="utf-8"><title>Боты играют
 
      rows.appendChild(row);
      if (open_settings === account.name) rows.appendChild(settingsRow(account));
+
+     if (focusedName === account.name && focused.type === 'number') {
+       rounds.focus();
+     }
    });
  }
 

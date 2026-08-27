@@ -147,7 +147,7 @@ class _MazeBot(_StubBot):
         self.maze = self
         self.config = config
 
-    def solve(self, rounds=None, should_stop=None):
+    def solve(self, rounds=None, should_stop=None, on_complete=None):
         type(self).should_stop = should_stop
         return 1
 
@@ -332,36 +332,33 @@ class TestEditingSettings:
         assert controller.configs["A"].min_keys == 400
 
 
-class TestMazeCollectsAfterwards:
-    def test_rewards_are_taken_when_the_mazes_are_done(self, controller, monkeypatch):
-        # A finished tier leaves a reward waiting, and an unclaimed one blocks
-        # the next tier from appearing at all.
+
+
+class TestCollectingBetweenMazes:
+    def test_rewards_are_taken_after_every_maze(self, controller, monkeypatch):
         import src.control as control_module
 
-        monkeypatch.setattr(control_module, "NeboBot", _CollectingMazeBot)
+        monkeypatch.setattr(control_module, "NeboBot", _PerMazeBot)
+        _PerMazeBot.collected = 0
         controller.start("Первый", "maze")
-        _wait_for(lambda: "наград" in controller.status("Первый"))
-        assert controller.status("Первый") == "лабиринтов: 2, наград: 1"
-
-    def test_nothing_is_mentioned_when_no_reward_was_due(self, controller, monkeypatch):
-        import src.control as control_module
-
-        _CollectingMazeBot.rewards = 0
-        monkeypatch.setattr(control_module, "NeboBot", _CollectingMazeBot)
-        controller.start("Первый", "maze")
-        _wait_for(lambda: controller.status("Первый") == "лабиринтов: 2")
-        _CollectingMazeBot.rewards = 1
+        _wait_for(lambda: "лабиринтов" in controller.status("Первый"))
+        # Three mazes, so three chances to take what ripened.
+        assert _PerMazeBot.collected == 3
 
 
-class _CollectingMazeBot(_StubBot):
-    rewards = 1
+class _PerMazeBot(_StubBot):
+    collected = 0
 
     def __init__(self, config):
         super().__init__(config)
         self.maze = self
 
-    def solve(self, rounds=None, should_stop=None):
-        return 2
+    def solve(self, rounds=None, should_stop=None, on_complete=None):
+        for _ in range(3):
+            if on_complete:
+                on_complete()
+        return 3
 
     def collect(self):
-        return type(self).rewards
+        type(self).collected += 1
+        return 1

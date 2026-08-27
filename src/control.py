@@ -88,6 +88,10 @@ class Controller:
         if job is None:
             return "—"
         if job.running:
+            if job.stopping.is_set():
+                # An attempt takes a while to wind up; without this the table
+                # looks identical to a stop that did nothing.
+                return "останавливаю…"
             return ACTIONS.get(job.action, job.action)
         return job.result or "готово"
 
@@ -297,9 +301,11 @@ class Controller:
                 if job.stopping.is_set():
                     job.result = "отменено"
                     return
-                # Two players never sign in on the same second.
-                if self.stagger:
-                    time.sleep(random.uniform(0, self.stagger))
+                # Two players never sign in on the same second. Waiting on the
+                # stop flag rather than sleeping means Stop is felt at once.
+                if self.stagger and job.stopping.wait(random.uniform(0, self.stagger)):
+                    job.result = "отменено"
+                    return
 
                 bot = NeboBot(config)
                 try:
@@ -324,9 +330,20 @@ class Controller:
             return f"забрано наград: {bot.collect()}"
 
         wanted = rounds if rounds is not None else bot.config.maze_rounds
-        done = bot.maze.solve(rounds=wanted, should_stop=job.stopping.is_set)
+        taken = 0
 
-        # Finishing mazes ripens marathon rewards, and an unclaimed one blocks
-        # the next tier — so take whatever came due before reporting.
-        taken = bot.collect()
-        return f"лабиринтов: {done}" + (f", наград: {taken}" if taken else "")
+        def collect_what_ripened() -> None:
+            # After each maze, not only at the end: a tier cleared mid-run
+            # leaves a reward waiting, and until it is taken the next tier does
+            # not appear, so the remaining mazes would count towards nothing.
+            nonlocal taken
+            taken += bot.collect()
+
+        done = bot.maze.solve(
+            rounds=wanted,
+            should_stop=job.stopping.is_set,
+            on_complete=collect_what_ripened,
+        )
+
+        outcome = f"лабиринтов: {done}" + (f", наград: {taken}" if taken else "")
+        return f"остановлено, {outcome}" if job.stopping.is_set() else outcome

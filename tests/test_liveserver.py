@@ -366,3 +366,20 @@ class TestRowButtonsAreClickable:
     def test_removal_asks_first(self, server):
         server.attach(FakeController())
         assert "confirm(" in get("", server)
+
+
+class TestTypedValuesSurviveRedraws:
+    def test_the_typed_round_count_is_remembered(self, server):
+        # The table is rebuilt on every event; the number used to snap back to
+        # the saved value, which looked exactly like the click being ignored.
+        server.attach(FakeController())
+        page = get("", server)
+        assert "chosen_rounds" in page
+
+    def test_typing_is_captured_as_it_happens(self, server):
+        server.attach(FakeController())
+        assert "addEventListener('input'" in get("", server)
+
+    def test_the_focused_field_keeps_focus(self, server):
+        server.attach(FakeController())
+        assert "rounds.focus()" in get("", server)
