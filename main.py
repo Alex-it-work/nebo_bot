@@ -212,14 +212,18 @@ def run_all(
     return outcomes
 
 
-def run_panel(configs: list[Config], at_once: int) -> int:
+def run_panel(configs: list[Config], at_once: int, config_path: str) -> int:
     """Serve the control panel and wait, driving nothing until asked.
 
     This is the whole bot for someone who does not use a terminal: one
     command, one page, buttons for every action.
     """
     server = LiveServer.shared(configs[0].live_port)
-    server.attach(Controller(configs, at_once=at_once, stagger=STAGGER_SECONDS))
+    server.attach(
+        Controller(
+            configs, at_once=at_once, stagger=STAGGER_SECONDS, config_path=config_path
+        )
+    )
 
     logger.info("Control panel at %s", server.url)
     logger.info("%d account(s) ready. Ctrl+C to close.", len(configs))
@@ -336,7 +340,7 @@ def main(argv: list[str] | None = None) -> int:
     setup_logging(configs[0], [config.username for config in configs])
 
     if args.panel:
-        return run_panel(configs, args.parallel or 3)
+        return run_panel(configs, args.parallel or 3, args.config)
     logger.info("Running %d account(s)", len(configs))
 
     results: dict[str, bool] = {}

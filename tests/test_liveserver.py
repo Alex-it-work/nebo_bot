@@ -187,9 +187,17 @@ class FakeController:
     def status(self, account):
         return self.busy.get(account, "—")
 
-    def start(self, account, action):
+    def rounds_for(self, account):
+        return 1
+
+    def start(self, account, action, rounds=None):
         self.started.append((account, action))
+        self.rounds = rounds
         return self.accept
+
+    def add_account(self, username, password):
+        self.added = (username, password)
+        return ""
 
     def stop(self, account):
         self.stopped.append(account)
@@ -283,3 +291,44 @@ class TestPanelScript:
         # textContent rather than innerHTML, so a name cannot become markup.
         server.attach(FakeController())
         assert "innerHTML" not in get("", server)
+
+
+class TestAddingAccounts:
+    def test_the_panel_offers_a_form(self, server):
+        server.attach(FakeController())
+        page = get("", server)
+        assert "Добавить профиль" in page and 'name="username"' in page
+
+    def test_the_form_hides_the_password(self, server):
+        server.attach(FakeController())
+        assert 'type="password"' in get("", server)
+
+    def test_columns_explain_themselves(self, server):
+        # "Занят" and "Событие" told a newcomer nothing.
+        server.attach(FakeController())
+        page = get("", server)
+        assert "Что делает" in page and "Последний ход" in page and "title=" in page
+
+    def test_rounds_are_shown_and_editable(self, server):
+        server.attach(FakeController())
+        page = get("", server)
+        assert "Кругов" in page and "type = 'number'" in page.replace("'", "'")
+
+
+class TestFormParsing:
+    def test_reads_both_fields(self):
+        from src.liveserver import _form_fields
+
+        newline = chr(13) + chr(10)
+        body = (
+            "------X" + newline + 'Content-Disposition: form-data; name="username"'
+            + newline + newline + "Новый" + newline
+            + "------X" + newline + 'Content-Disposition: form-data; name="password"'
+            + newline + newline + "secret" + newline + "------X--" + newline
+        )
+        assert _form_fields(body) == {"username": "Новый", "password": "secret"}
+
+    def test_an_empty_body_yields_nothing(self):
+        from src.liveserver import _form_fields
+
+        assert _form_fields("") == {}

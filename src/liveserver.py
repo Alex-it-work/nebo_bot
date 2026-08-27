@@ -16,10 +16,11 @@ import html as html_module
 import json
 import logging
 import queue
+import re
 import threading
 from datetime import datetime
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
-from urllib.parse import quote, unquote
+from urllib.parse import parse_qs, quote, unquote
 
 logger = logging.getLogger(__name__)
 
@@ -45,6 +46,12 @@ _STYLE = """
         margin-right:.3rem;cursor:pointer;color:#fff}
  .go{background:#285688}.go:hover{background:#4775a7}
  .stop{background:#8a3a3a}.stop:hover{background:#a94a4a}
+ input{font:inherit;width:4rem;padding:.2rem .3rem;border:1px solid #4775a7;
+       border-radius:.25rem;background:#043264;color:#ddd}
+ .add input{width:11rem}
+ .add{margin-top:1.5rem;padding:.8rem;background:#043264;border-radius:.4rem;
+      max-width:60rem;display:flex;gap:.5rem;align-items:center;flex-wrap:wrap}
+ .hint{max-width:60rem;line-height:1.6;color:#bcd}
 """
 
 _OVERVIEW = """<!doctype html><meta charset="utf-8"><title>Боты играют</title>
@@ -53,14 +60,38 @@ _OVERVIEW = """<!doctype html><meta charset="utf-8"><title>Боты играют
 <span id="when">ожидание…</span>
 <button class="go" data-all="maze">Лабиринт всем</button>
 <button class="go" data-all="collect">Забрать всё</button>
-<button class="stop" data-all="stop">Стоп</button></header>
-<main><table><thead><tr><th>Профиль<th>Занят<th>Страница<th>Событие<th>Действия
-</tr></thead><tbody id="rows"></tbody></table></main>
+<button class="stop" data-all="stop">Остановить всех</button></header>
+<main>
+<table><thead><tr>
+<th title="Имя в игре. Нажмите, чтобы смотреть игру этого профиля">Профиль
+<th title="Чем профиль занят прямо сейчас, либо чем закончил">Что делает
+<th title="Страница игры, открытая последней">Где сейчас
+<th title="Когда бот в последний раз открывал страницу">Последний ход
+<th title="Сколько лабиринтов пройти за один запуск">Кругов
+<th>Действия
+</tr></thead><tbody id="rows"></tbody></table>
+
+<p class="hint">
+ <b>Лабиринт</b> — пройти лабиринт столько раз, сколько указано в «Кругов».
+ Один круг стоит около 130 ключей.<br>
+ <b>Награды</b> — забрать созревшие награды с личных заданий и марафона.<br>
+ <b>Стоп</b> — закончить после текущей попытки. Начатый лабиринт не бросается,
+ иначе потраченные на него ключи пропадут.
+</p>
+
+<form id="add" class="add">
+ <b>Добавить профиль:</b>
+ <input name="username" placeholder="имя в игре" autocomplete="off">
+ <input name="password" placeholder="пароль" type="password" autocomplete="off">
+ <button class="go" type="submit">Добавить</button>
+ <span id="added"></span>
+</form>
+</main>
 <script>
  var rows = document.getElementById('rows');
 
- function post(path) {
-   return fetch(path, {method: 'POST'});
+ function post(path, body) {
+   return fetch(path, {method: 'POST', body: body});
  }
 
  // One listener for the whole page rather than inline handlers. Building
@@ -69,13 +100,14 @@ _OVERVIEW = """<!doctype html><meta charset="utf-8"><title>Боты играют
  // is exactly how the table came up empty while the server had six accounts.
  document.addEventListener('click', function (event) {
    var button = event.target.closest('button');
-   if (!button) return;
+   if (!button || button.type === 'submit') return;
 
    var everyone = button.dataset.all;
    if (everyone === 'stop') return void post('stop-all');
    if (everyone) {
      document.querySelectorAll('tr[data-name]').forEach(function (row) {
-       post('run/' + encodeURIComponent(row.dataset.name) + '/' + everyone);
+       post('run/' + encodeURIComponent(row.dataset.name) + '/' + everyone +
+            '?rounds=' + roundsOf(row));
      });
      return;
    }
@@ -83,8 +115,25 @@ _OVERVIEW = """<!doctype html><meta charset="utf-8"><title>Боты играют
    var row = button.closest('tr');
    if (!row || !button.dataset.do) return;
    var name = encodeURIComponent(row.dataset.name);
-   post(button.dataset.do === 'stop' ? 'stop/' + name
-                                     : 'run/' + name + '/' + button.dataset.do);
+   if (button.dataset.do === 'stop') return void post('stop/' + name);
+   post('run/' + name + '/' + button.dataset.do + '?rounds=' + roundsOf(row));
+ });
+
+ function roundsOf(row) {
+   var field = row.querySelector('input[type=number]');
+   return field ? field.value : '';
+ }
+
+ document.getElementById('add').addEventListener('submit', function (event) {
+   event.preventDefault();
+   var note = document.getElementById('added');
+   note.textContent = 'добавляю…';
+   post('add', new FormData(event.target)).then(function (response) {
+     return response.text();
+   }).then(function (text) {
+     note.textContent = text;
+     if (text === 'добавлен') event.target.reset();
+   });
  });
 
  function cell(text) {
@@ -104,6 +153,7 @@ _OVERVIEW = """<!doctype html><meta charset="utf-8"><title>Боты играют
  function draw(state) {
    document.getElementById('n').textContent = state.length;
    document.getElementById('when').textContent = new Date().toLocaleTimeString();
+   var focused = document.activeElement;
    rows.replaceChildren();
    state.forEach(function (account) {
      var row = document.createElement('tr');
@@ -119,6 +169,15 @@ _OVERVIEW = """<!doctype html><meta charset="utf-8"><title>Боты играют
      row.appendChild(cell(account.busy || '—'));
      row.appendChild(cell(account.title));
      row.appendChild(cell(account.when));
+
+     var roundsCell = document.createElement('td');
+     var rounds = document.createElement('input');
+     rounds.type = 'number';
+     rounds.min = '1';
+     rounds.value = account.rounds;
+     rounds.title = 'Сколько лабиринтов пройти за один запуск';
+     roundsCell.appendChild(rounds);
+     row.appendChild(roundsCell);
 
      var actions = document.createElement('td');
      actions.appendChild(button('Лабиринт', 'go', 'maze'));
@@ -172,6 +231,24 @@ _WATCH = """<!doctype html><meta charset="utf-8"><title>NAME</title>
  events.onerror = function () { dot.className = 'dot gone'; };
 </script>
 """
+
+
+def _form_fields(body: str) -> dict[str, str]:
+    """Pull the fields out of a multipart form body.
+
+    FormData posts multipart, and pulling two text fields out of it by hand
+    is less trouble than dragging in a parser for the purpose.
+    """
+    fields: dict[str, str] = {}
+    newline = chr(13) + chr(10)
+    for part in body.split("--"):
+        name = re.search(r'name="([^"]+)"', part)
+        if name is None:
+            continue
+        halves = part.split(newline + newline, 1)
+        if len(halves) == 2:
+            fields[name.group(1)] = halves[1].strip(newline)
+    return fields
 
 
 class Channel:
@@ -296,6 +373,7 @@ class LiveServer:
                     "busy": html_module.escape(
                         self.controller.status(c.name) if self.controller else ""
                     ),
+                    "rounds": self.controller.rounds_for(c.name) if self.controller else 1,
                 }
                 for c in self.channels.values()
             ],
@@ -322,10 +400,13 @@ class LiveServer:
                 """Silence the default stderr access log."""
 
             def do_POST(self):  # noqa: N802 - name fixed by BaseHTTPRequestHandler
-                parts = [unquote(p) for p in self.path.split("?")[0].split("/") if p]
+                path, _, query = self.path.partition("?")
+                parts = [unquote(p) for p in path.split("/") if p]
 
                 if server.controller is None:
                     self._send("<p>Управление недоступно", status=503)
+                elif parts == ["add"]:
+                    self._add()
                 elif parts == ["stop-all"]:
                     stopped = server.controller.stop_all()
                     self._send(f"<p>Остановлено: {stopped}")
@@ -333,7 +414,9 @@ class LiveServer:
                     ok = server.controller.stop(parts[1])
                     self._send("<p>Останавливаю" if ok else "<p>Нечего останавливать")
                 elif len(parts) == 3 and parts[0] == "run":
-                    ok = server.controller.start(parts[1], parts[2])
+                    wanted = parse_qs(query).get("rounds", [""])[0]
+                    rounds = int(wanted) if wanted.isdigit() and int(wanted) > 0 else None
+                    ok = server.controller.start(parts[1], parts[2], rounds)
                     self._send("<p>Запущено" if ok else "<p>Занят или неизвестен",
                                status=200 if ok else 409)
                 else:
@@ -368,6 +451,20 @@ class LiveServer:
                     self._stream(parts[1], str(channel.pages) if channel else "0")
                 else:
                     self._send("<p>Нет такой страницы", status=404)
+
+            def _add(self):
+                """Take a new account from the panel's form."""
+                length = int(self.headers.get("Content-Length") or 0)
+                body = self.rfile.read(length).decode("utf-8", "replace")
+                fields = _form_fields(body)
+                problem = server.controller.add_account(
+                    fields.get("username", ""), fields.get("password", "")
+                )
+                if problem:
+                    self._send(problem, status=400)
+                    return
+                server.channel(fields["username"].strip())
+                self._send("добавлен")
 
             def _send(self, body: str, status: int = 200):
                 encoded = body.encode("utf-8")

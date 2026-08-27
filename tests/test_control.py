@@ -169,3 +169,62 @@ def test_jobs_run_on_their_own_threads(controller, monkeypatch):
     before = threading.active_count()
     controller.start("Первый", "check")
     assert threading.active_count() > before
+
+
+class TestAddingAccounts:
+    def test_adds_to_the_file_and_registers_it(self, tmp_path):
+        import yaml
+
+        path = tmp_path / "c.yml"
+        path.write_text(yaml.safe_dump({
+            "defaults": {"base_url": "https://nebo.mobi"},
+            "accounts": [{"username": "Первый", "password": "p"}],
+        }, allow_unicode=True), encoding="utf-8")
+
+        controller = Controller(
+            [Config(username="Первый", password="p")], stagger=0, config_path=str(path)
+        )
+        assert controller.add_account("Второй", "pw") == ""
+        assert "Второй" in controller.names()
+
+        saved = yaml.safe_load(path.read_text(encoding="utf-8"))
+        assert [a["username"] for a in saved["accounts"]] == ["Первый", "Второй"]
+
+    def test_refuses_a_duplicate(self, tmp_path):
+        import yaml
+
+        path = tmp_path / "c.yml"
+        path.write_text(yaml.safe_dump({"accounts": [{"username": "A", "password": "p"}]}),
+                        encoding="utf-8")
+        controller = Controller([Config(username="A", password="p")], stagger=0,
+                                config_path=str(path))
+        assert "уже есть" in controller.add_account("A", "pw")
+
+    def test_refuses_empty_fields(self, tmp_path):
+        controller = Controller([], stagger=0, config_path=str(tmp_path / "c.yml"))
+        assert "нужны" in controller.add_account("", "pw")
+        assert "нужны" in controller.add_account("A", "")
+
+    def test_refuses_without_a_file_to_write_to(self):
+        controller = Controller([], stagger=0)
+        assert "не задан" in controller.add_account("A", "pw")
+
+    def test_grows_a_single_account_file_into_a_list(self, tmp_path):
+        # The old flat format has to become an accounts list before a second
+        # account can be appended to it.
+        import yaml
+
+        path = tmp_path / "c.yml"
+        path.write_text(yaml.safe_dump({"username": "Solo", "password": "p", "timeout": 30}),
+                        encoding="utf-8")
+        controller = Controller([Config(username="Solo", password="p")], stagger=0,
+                                config_path=str(path))
+        assert controller.add_account("Второй", "pw") == ""
+
+        saved = yaml.safe_load(path.read_text(encoding="utf-8"))
+        assert [a["username"] for a in saved["accounts"]] == ["Solo", "Второй"]
+        assert saved["defaults"]["timeout"] == 30
+
+    def test_rounds_are_reported_per_account(self):
+        controller = Controller([Config(username="A", password="p", maze_rounds=4)], stagger=0)
+        assert controller.rounds_for("A") == 4
