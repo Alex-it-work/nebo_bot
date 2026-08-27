@@ -369,3 +369,18 @@ class TestCollecting:
         monkeypatch.setattr(bot, "_keys", lambda: 0)
         assert bot.collect() == 1
         assert seen == ["/quests", "/tasks"]
+
+
+class TestHoldingTheDashboard:
+    def test_a_login_check_does_not_hang_waiting_to_be_watched(self, monkeypatch, tmp_path):
+        import main as main_module
+        import yaml
+
+        path = tmp_path / "c.yml"
+        path.write_text(yaml.safe_dump({
+            "defaults": {"live_view": True, "log_file": str(tmp_path / "l.log")},
+            "accounts": [{"username": "A", "password": "p"}],
+        }), encoding="utf-8")
+        monkeypatch.setattr(main_module, "run_account", lambda *a, **k: True)
+        # Would block forever if the dashboard were held open here.
+        assert main_module.main(["-c", str(path), "--login-only"]) == 0

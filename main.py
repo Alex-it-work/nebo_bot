@@ -319,7 +319,9 @@ def main(argv: list[str] | None = None) -> int:
     succeeded = sum(results.values())
     logger.info("Finished: %d of %d account(s) succeeded", succeeded, len(results))
 
-    if any(config.live_view for config in configs):
+    # Only worth holding open when there was something to watch: a login check
+    # or a collection is over before a browser could be pointed at it.
+    if any(config.live_view for config in configs) and not (args.login_only or args.collect):
         # The dashboard lives inside this process, so exiting would take it
         # down at the exact moment there is a result worth looking at.
         logger.info(
