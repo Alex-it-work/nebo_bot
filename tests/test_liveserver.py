@@ -95,9 +95,11 @@ class TestWatchPage:
 
     def test_no_frame_paints_itself_white(self, server):
         # A white frame background was what burned the eyes on every swap.
+        # Only the frame rule matters here: white button text is fine.
         server.publish("Первый", "<p>x", "t")
         styles = get("watch/Первый", server).split("<style>")[1].split("</style>")[0]
-        assert "#fff" not in styles.lower()
+        frame_rule = styles.split("iframe{")[1].split("}")[0]
+        assert "#fff" not in frame_rule.lower() and "#036" in frame_rule
 
 
 class TestSafety:
@@ -168,3 +170,92 @@ class TestNoNesting:
     def test_back_link_goes_to_the_root(self, server):
         server.publish("Первый", "<p>x", "t")
         assert 'href="/"' in get("watch/Первый", server)
+
+
+class FakeController:
+    """Stands in for the real controller in dashboard tests."""
+
+    def __init__(self):
+        self.started: list[tuple[str, str]] = []
+        self.stopped: list[str] = []
+        self.busy: dict[str, str] = {}
+        self.accept = True
+
+    def names(self):
+        return ["Первый", "Второй"]
+
+    def status(self, account):
+        return self.busy.get(account, "—")
+
+    def start(self, account, action):
+        self.started.append((account, action))
+        return self.accept
+
+    def stop(self, account):
+        self.stopped.append(account)
+        return True
+
+    def stop_all(self):
+        self.stopped.append("*")
+        return 2
+
+
+def post(path: str, server: LiveServer):
+    quoted = urllib.parse.quote(path, safe="/")
+    request = urllib.request.Request(server.url + quoted, method="POST", data=b"")
+    with urllib.request.urlopen(request, timeout=5) as response:
+        return response.status, response.read().decode("utf-8")
+
+
+class TestControls:
+    def test_the_overview_offers_buttons(self, server):
+        server.attach(FakeController())
+        page = get("", server)
+        assert "Лабиринт" in page and "Награды" in page and "Стоп" in page
+
+    def test_starting_a_job_reaches_the_controller(self, server):
+        controller = FakeController()
+        server.attach(controller)
+        status, _ = post("run/Первый/maze", server)
+        assert status == 200 and controller.started == [("Первый", "maze")]
+
+    def test_a_busy_account_is_refused_rather_than_queued(self, server):
+        controller = FakeController()
+        controller.accept = False
+        server.attach(controller)
+        with pytest.raises(urllib.error.HTTPError) as raised:
+            post("run/Первый/maze", server)
+        assert raised.value.code == 409
+
+    def test_stopping_one_account(self, server):
+        controller = FakeController()
+        server.attach(controller)
+        post("stop/Первый", server)
+        assert controller.stopped == ["Первый"]
+
+    def test_stopping_everything(self, server):
+        controller = FakeController()
+        server.attach(controller)
+        post("stop-all", server)
+        assert controller.stopped == ["*"]
+
+    def test_attaching_registers_every_account(self, server):
+        server.attach(FakeController())
+        assert set(server.channels) == {"Первый", "Второй"}
+
+    def test_the_table_shows_what_each_is_busy_with(self, server):
+        controller = FakeController()
+        controller.busy["Первый"] = "Пройти лабиринт"
+        server.attach(controller)
+        assert "Пройти лабиринт" in server._summary()
+
+    def test_controls_are_inert_without_a_controller(self, server):
+        with pytest.raises(urllib.error.HTTPError) as raised:
+            post("run/Первый/maze", server)
+        assert raised.value.code == 503
+
+    def test_an_unknown_command_is_refused(self, server):
+        server.attach(FakeController())
+        with pytest.raises(urllib.error.HTTPError) as raised:
+            post("nonsense", server)
+        assert raised.value.code == 404

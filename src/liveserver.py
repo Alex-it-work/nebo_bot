@@ -41,26 +41,55 @@ _STYLE = """
  iframe{position:absolute;inset:0;border:0;width:100%;height:100%;
         background:#036;opacity:0;transition:opacity .12s}
  iframe.shown{opacity:1}
+ button{font:inherit;border:0;border-radius:.25rem;padding:.25rem .6rem;
+        margin-right:.3rem;cursor:pointer;color:#fff}
+ .go{background:#285688}.go:hover{background:#4775a7}
+ .stop{background:#8a3a3a}.stop:hover{background:#a94a4a}
 """
 
 _OVERVIEW = """<!doctype html><meta charset="utf-8"><title>Боты играют</title>
 <style>STYLE</style>
 <header><span class="dot" id="dot"></span><span>Профилей: <b id="n">0</b></span>
-<span id="when">ожидание…</span></header>
-<main><table><thead><tr><th>Профиль<th>Страница<th>Последнее событие<th>Страниц
+<span id="when">ожидание…</span>
+<button class="go" onclick="allAccounts('maze')">Лабиринт всем</button>
+<button class="go" onclick="allAccounts('collect')">Забрать всё</button>
+<button class="stop" onclick="post('stop-all')">Стоп</button></header>
+<main><table><thead><tr><th>Профиль<th>Занят<th>Страница<th>Событие<th>Действия
 </tr></thead><tbody id="rows"></tbody></table></main>
 <script>
  var rows = document.getElementById('rows');
- var events = new EventSource('events');
- events.onmessage = function (e) {
-   var state = JSON.parse(e.data);
+
+ function post(path) {
+   return fetch(path, {method: 'POST'});
+ }
+ function run(name, action) {
+   post('run/' + encodeURIComponent(name) + '/' + action);
+ }
+ function allAccounts(action) {
+   var names = Array.prototype.map.call(
+     document.querySelectorAll('tr[data-name]'),
+     function (row) { return row.getAttribute('data-name'); });
+   names.forEach(function (n) { run(n, action); });
+ }
+
+ function draw(state) {
    document.getElementById('n').textContent = state.length;
    document.getElementById('when').textContent = new Date().toLocaleTimeString();
    rows.innerHTML = state.map(function (a) {
-     return '<tr><td><a href="watch/' + encodeURIComponent(a.name) + '">' +
-            a.name + '</a><td>' + a.title + '<td>' + a.when + '<td>' + a.pages;
+     var name = a.name.replace(/"/g, '&quot;');
+     var buttons =
+       '<button class="go" onclick="run(this.closest('tr').dataset.name,'maze')">Лабиринт</button>' +
+       '<button class="go" onclick="run(this.closest('tr').dataset.name,'collect')">Награды</button>' +
+       '<button class="stop" onclick="post('stop/'+encodeURIComponent(this.closest('tr').dataset.name))">Стоп</button>';
+     return '<tr data-name="' + name + '"><td><a href="watch/' +
+            encodeURIComponent(a.name) + '">' + a.name + '</a>' +
+            '<td>' + (a.busy || '—') + '<td>' + a.title + '<td>' + a.when +
+            '<td>' + buttons;
    }).join('');
- };
+ }
+
+ var events = new EventSource('events');
+ events.onmessage = function (e) { draw(JSON.parse(e.data)); };
  events.onerror = function () { document.getElementById('dot').className = 'dot gone'; };
 </script>
 """
@@ -128,6 +157,12 @@ class LiveServer:
     _shared: "LiveServer | None" = None
     _shared_lock = threading.Lock()
 
+    def attach(self, controller) -> None:
+        """Give the dashboard something to drive."""
+        self.controller = controller
+        for name in controller.names():
+            self.channel(name)
+
     @classmethod
     def shared(cls, port: int = 8765) -> "LiveServer":
         """Return the one server every account reports into.
@@ -140,9 +175,17 @@ class LiveServer:
                 cls._shared = cls(port)
             return cls._shared
 
-    def __init__(self, port: int = 8765):
-        """Start the server on a daemon thread."""
+    def __init__(self, port: int = 8765, controller=None):
+        """Start the server on a daemon thread.
+
+        Args:
+            port: Port on localhost to listen on.
+            controller: Optional object able to start and stop per-account
+                jobs, which is what turns the dashboard from a window into
+                a set of controls.
+        """
         self.port = port
+        self.controller = controller
         self.channels: dict[str, Channel] = {}
         self._subscribers: dict[str | None, list[queue.Queue[str]]] = {}
         self._lock = threading.Lock()
@@ -178,6 +221,14 @@ class LiveServer:
         for listener in overview:
             listener.put(summary)
 
+    def refresh(self) -> None:
+        """Push the current state to the overview without a new page."""
+        with self._lock:
+            listeners = list(self._subscribers.get(None, []))
+            summary = self._summary()
+        for listener in listeners:
+            listener.put(summary)
+
     def stop(self) -> None:
         """Shut the server down and release the port.
 
@@ -200,6 +251,9 @@ class LiveServer:
                     "title": html_module.escape(c.title),
                     "when": c.when,
                     "pages": c.pages,
+                    "busy": html_module.escape(
+                        self.controller.status(c.name) if self.controller else ""
+                    ),
                 }
                 for c in self.channels.values()
             ],
@@ -224,6 +278,27 @@ class LiveServer:
         class Handler(BaseHTTPRequestHandler):
             def log_message(self, *args):
                 """Silence the default stderr access log."""
+
+            def do_POST(self):  # noqa: N802 - name fixed by BaseHTTPRequestHandler
+                parts = [unquote(p) for p in self.path.split("?")[0].split("/") if p]
+
+                if server.controller is None:
+                    self._send("<p>Управление недоступно", status=503)
+                elif parts == ["stop-all"]:
+                    stopped = server.controller.stop_all()
+                    self._send(f"<p>Остановлено: {stopped}")
+                elif len(parts) == 2 and parts[0] == "stop":
+                    ok = server.controller.stop(parts[1])
+                    self._send("<p>Останавливаю" if ok else "<p>Нечего останавливать")
+                elif len(parts) == 3 and parts[0] == "run":
+                    ok = server.controller.start(parts[1], parts[2])
+                    self._send("<p>Запущено" if ok else "<p>Занят или неизвестен",
+                               status=200 if ok else 409)
+                else:
+                    self._send("<p>Нет такой команды", status=404)
+
+                # A control action changes what the table should say.
+                server.refresh()
 
             def do_GET(self):  # noqa: N802 - name fixed by BaseHTTPRequestHandler
                 path = self.path.split("?")[0]

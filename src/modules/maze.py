@@ -180,7 +180,7 @@ class MazeBot:
                 numbered[int(match.group(1))] = url
         return numbered
 
-    def solve(self, rounds: int | None = None) -> int:
+    def solve(self, rounds: int | None = None, should_stop=None) -> int:
         """Complete whole mazes, prize included.
 
         A dead end restarts from the entrance; so does a win, since "Начать
@@ -190,6 +190,9 @@ class MazeBot:
             rounds: How many mazes to complete, or 0 for as many as the keys,
                 attempt limit and session budget allow. Defaults to the
                 configured value.
+            should_stop: Called between attempts; when it returns True the run
+                winds up. Checked between attempts rather than mid-maze, since
+                abandoning a half-walked maze wastes the keys already spent.
 
         Returns:
             The number of mazes completed.
@@ -206,6 +209,10 @@ class MazeBot:
         attempt = 0
 
         while rounds == 0 or completed < rounds:
+            if should_stop is not None and should_stop():
+                logger.info("Asked to stop; finishing after %d maze(s)", completed)
+                break
+
             if budget.expired():
                 logger.info(
                     "Session limit of %d min reached; stopping after %d maze(s)",

@@ -9,10 +9,13 @@ import re
 import sys
 import threading
 import time
+import webbrowser
 from dataclasses import replace
 from pathlib import Path
 
 from src.bot import NeboBot
+from src.control import Controller
+from src.liveserver import LiveServer
 from src.config import Config, ConfigError, Delays
 from src import config as config_module
 
@@ -79,6 +82,12 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
         metavar="N",
         help="run accounts at the same time, at most N of them (default 3). "
              "Thirty at once is a very different load than one player",
+    )
+    parser.add_argument(
+        "--panel",
+        action="store_true",
+        help="open the control panel in a browser and drive everything from "
+             "there, with no further commands",
     )
     parser.add_argument(
         "--list-accounts",
@@ -203,6 +212,29 @@ def run_all(
     return outcomes
 
 
+def run_panel(configs: list[Config], at_once: int) -> int:
+    """Serve the control panel and wait, driving nothing until asked.
+
+    This is the whole bot for someone who does not use a terminal: one
+    command, one page, buttons for every action.
+    """
+    server = LiveServer.shared(configs[0].live_port)
+    server.attach(Controller(configs, at_once=at_once, stagger=STAGGER_SECONDS))
+
+    logger.info("Панель управления: %s", server.url)
+    logger.info("Профилей: %d. Ctrl+C чтобы закрыть.", len(configs))
+    try:
+        webbrowser.open(server.url)
+    except Exception:  # noqa: BLE001 - opening a browser is a convenience
+        logger.debug("Could not open a browser automatically")
+
+    try:
+        threading.Event().wait()
+    except KeyboardInterrupt:
+        logger.info("Закрываю панель")
+    return 0
+
+
 def run_account(config: Config, login_only: bool, collect_only: bool = False) -> bool:
     """Play one account from login to logout.
 
@@ -302,6 +334,9 @@ def main(argv: list[str] | None = None) -> int:
 
     # Logging settings come from the first account; they are global anyway.
     setup_logging(configs[0], [config.username for config in configs])
+
+    if args.panel:
+        return run_panel(configs, args.parallel or 3)
     logger.info("Running %d account(s)", len(configs))
 
     results: dict[str, bool] = {}
