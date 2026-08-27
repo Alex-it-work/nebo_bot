@@ -325,4 +325,8 @@ class Controller:
 
         wanted = rounds if rounds is not None else bot.config.maze_rounds
         done = bot.maze.solve(rounds=wanted, should_stop=job.stopping.is_set)
-        return f"лабиринтов: {done}"
+
+        # Finishing mazes ripens marathon rewards, and an unclaimed one blocks
+        # the next tier — so take whatever came due before reporting.
+        taken = bot.collect()
+        return f"лабиринтов: {done}" + (f", наград: {taken}" if taken else "")

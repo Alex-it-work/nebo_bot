@@ -330,3 +330,38 @@ class TestEditingSettings:
         controller, _ = self._controller(tmp_path, min_keys=400)
         controller.update_account("A", {"maze_rounds": "2"})
         assert controller.configs["A"].min_keys == 400
+
+
+class TestMazeCollectsAfterwards:
+    def test_rewards_are_taken_when_the_mazes_are_done(self, controller, monkeypatch):
+        # A finished tier leaves a reward waiting, and an unclaimed one blocks
+        # the next tier from appearing at all.
+        import src.control as control_module
+
+        monkeypatch.setattr(control_module, "NeboBot", _CollectingMazeBot)
+        controller.start("Первый", "maze")
+        _wait_for(lambda: "наград" in controller.status("Первый"))
+        assert controller.status("Первый") == "лабиринтов: 2, наград: 1"
+
+    def test_nothing_is_mentioned_when_no_reward_was_due(self, controller, monkeypatch):
+        import src.control as control_module
+
+        _CollectingMazeBot.rewards = 0
+        monkeypatch.setattr(control_module, "NeboBot", _CollectingMazeBot)
+        controller.start("Первый", "maze")
+        _wait_for(lambda: controller.status("Первый") == "лабиринтов: 2")
+        _CollectingMazeBot.rewards = 1
+
+
+class _CollectingMazeBot(_StubBot):
+    rewards = 1
+
+    def __init__(self, config):
+        super().__init__(config)
+        self.maze = self
+
+    def solve(self, rounds=None, should_stop=None):
+        return 2
+
+    def collect(self):
+        return type(self).rewards
