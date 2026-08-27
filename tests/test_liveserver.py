@@ -380,6 +380,37 @@ class TestTypedValuesSurviveRedraws:
         server.attach(FakeController())
         assert "addEventListener('input'" in get("", server)
 
-    def test_the_focused_field_keeps_focus(self, server):
+    def test_a_field_being_typed_into_is_left_alone(self, server):
+        # Rows are updated in place now, so focus is never lost to begin with.
         server.attach(FakeController())
-        assert "rounds.focus()" in get("", server)
+        assert "document.activeElement !== rounds" in get("", server)
+
+    def test_rows_are_updated_rather_than_rebuilt(self, server):
+        # Rebuilding threw away whatever was being typed, several times a
+        # second, which made the round count impossible to set mid-run.
+        server.attach(FakeController())
+        page = get("", server)
+        assert "replaceChildren()" not in page and "setText" in page
+
+
+class TestPanelScriptIsValid:
+    def test_no_regular_expressions_in_the_panel_script(self, server):
+        # A regex written through several layers of escaping arrived broken and
+        # took the whole script with it: "Invalid regular expression".
+        server.attach(FakeController())
+        page = get("", server)
+        script = page.split("<script>")[1].split("</script>")[0]
+        assert "replace(/" not in script
+
+    def test_rows_are_found_by_name_not_by_selector(self, server):
+        server.attach(FakeController())
+        assert "row_by_name" in get("", server)
+
+    def test_the_script_has_balanced_braces_and_quotes(self, server):
+        # A cheap smoke test for the class of breakage that leaves the table
+        # empty with no visible error.
+        server.attach(FakeController())
+        script = get("", server).split("<script>")[1].split("</script>")[0]
+        assert script.count("{") == script.count("}")
+        assert script.count("(") == script.count(")")
+        assert script.count("'") % 2 == 0

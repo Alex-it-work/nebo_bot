@@ -167,6 +167,7 @@ _OVERVIEW = """<!doctype html><meta charset="utf-8"><title>Боты играют
  // The table is rebuilt on every event; without remembering what was typed,
  // the number would snap back to the saved one and look like it was ignored.
  var chosen_rounds = {};
+ var row_by_name = {};
 
  function field(form, key, label, value, type) {
    var wrap = document.createElement('label');
@@ -181,6 +182,8 @@ _OVERVIEW = """<!doctype html><meta charset="utf-8"><title>Боты играют
 
  function settingsRow(account) {
    var row = document.createElement('tr');
+   row.className = 'settings-row';
+   row.dataset.forName = account.name;
    var cellHolder = document.createElement('td');
    cellHolder.colSpan = 6;
 
@@ -237,57 +240,91 @@ _OVERVIEW = """<!doctype html><meta charset="utf-8"><title>Боты играют
    return element;
  }
 
+ function buildRow(account) {
+   var row = document.createElement('tr');
+   row.dataset.name = account.name;
+
+   var first = document.createElement('td');
+   var link = document.createElement('a');
+   link.href = 'watch/' + encodeURIComponent(account.name);
+   link.textContent = account.name;
+   first.appendChild(link);
+   row.appendChild(first);
+
+   row.appendChild(cell(''));
+   row.appendChild(cell(''));
+   row.appendChild(cell(''));
+
+   var roundsCell = document.createElement('td');
+   var rounds = document.createElement('input');
+   rounds.type = 'number';
+   rounds.min = '1';
+   rounds.value = account.rounds;
+   rounds.title = 'Сколько лабиринтов пройти за один запуск';
+   roundsCell.appendChild(rounds);
+   row.appendChild(roundsCell);
+
+   var actions = document.createElement('td');
+   actions.appendChild(button('Лабиринт', 'go', 'maze'));
+   actions.appendChild(button('Награды', 'go', 'collect'));
+   actions.appendChild(button('Стоп', 'stop', 'stop'));
+   actions.appendChild(button('Настройки', 'plain', 'settings'));
+   actions.appendChild(button('Удалить', 'stop', 'remove'));
+   row.appendChild(actions);
+   return row;
+ }
+
+ // Rows are updated in place, never rebuilt. Replacing them wholesale threw
+ // away whatever was being typed several times a second, which made the round
+ // count impossible to set while anything was running.
  function draw(state) {
    last_state = state;
    document.getElementById('n').textContent = state.length;
    document.getElementById('when').textContent = new Date().toLocaleTimeString();
-   var focused = document.activeElement;
-   var focusedRow = focused && focused.closest
-     ? focused.closest('tr[data-name]')
-     : null;
-   var focusedName = focusedRow ? focusedRow.dataset.name : null;
-   rows.replaceChildren();
+
+   var seen = {};
    state.forEach(function (account) {
-     var row = document.createElement('tr');
-     row.dataset.name = account.name;
+     seen[account.name] = true;
+     var row = row_by_name[account.name];
+     if (!row || !row.isConnected) {
+       row = buildRow(account);
+       row_by_name[account.name] = row;
+       rows.appendChild(row);
+     }
 
-     var first = document.createElement('td');
-     var link = document.createElement('a');
-     link.href = 'watch/' + encodeURIComponent(account.name);
-     link.textContent = account.name;
-     first.appendChild(link);
-     row.appendChild(first);
+     var cells = row.children;
+     setText(cells[1], account.busy || '—');
+     setText(cells[2], account.title);
+     setText(cells[3], account.when);
 
-     row.appendChild(cell(account.busy || '—'));
-     row.appendChild(cell(account.title));
-     row.appendChild(cell(account.when));
+     var rounds = cells[4].querySelector('input');
+     // Only touch the field when nobody is typing in it.
+     if (document.activeElement !== rounds && chosen_rounds[account.name] === undefined) {
+       rounds.value = account.rounds;
+     }
 
-     var roundsCell = document.createElement('td');
-     var rounds = document.createElement('input');
-     rounds.type = 'number';
-     rounds.min = '1';
-     rounds.value = chosen_rounds[account.name] !== undefined
-       ? chosen_rounds[account.name]
-       : account.rounds;
-     rounds.title = 'Сколько лабиринтов пройти за один запуск';
-     roundsCell.appendChild(rounds);
-     row.appendChild(roundsCell);
-
-     var actions = document.createElement('td');
-     actions.appendChild(button('Лабиринт', 'go', 'maze'));
-     actions.appendChild(button('Награды', 'go', 'collect'));
-     actions.appendChild(button('Стоп', 'stop', 'stop'));
-     actions.appendChild(button('Настройки', 'plain', 'settings'));
-     actions.appendChild(button('Удалить', 'stop', 'remove'));
-     row.appendChild(actions);
-
-     rows.appendChild(row);
-     if (open_settings === account.name) rows.appendChild(settingsRow(account));
-
-     if (focusedName === account.name && focused.type === 'number') {
-       rounds.focus();
+     var settings = row.nextElementSibling;
+     var isSettings = settings && settings.classList.contains('settings-row') &&
+                      settings.dataset.forName === account.name;
+     if (open_settings === account.name && !isSettings) {
+       row.after(settingsRow(account));
+     } else if (open_settings !== account.name && isSettings) {
+       settings.remove();
      }
    });
+
+   rows.querySelectorAll('tr[data-name]').forEach(function (row) {
+     if (!seen[row.dataset.name]) {
+       var settings = row.nextElementSibling;
+       if (settings && settings.classList.contains('settings-row')) settings.remove();
+       delete row_by_name[row.dataset.name];
+       row.remove();
+     }
+   });
+ }
+
+ function setText(cell, text) {
+   if (cell.textContent !== text) cell.textContent = text;
  }
 
  var events = new EventSource('events');
