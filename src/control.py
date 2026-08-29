@@ -52,10 +52,15 @@ class Job:
     handed_over: bool = False
     # Live progress. Without these the table said "Пройти лабиринт" for an
     # hour and there was no way to tell how much of it was behind you.
-    done: int = 0
+    completed: int = 0
     target: int = 0
     attempt: int = 0
     bot: object | None = None
+    # Where the count stood when the round count was last changed. Changing it
+    # means "this many more from here", so the display counts from there and
+    # the run aims for that many beyond it.
+    banked: int = 0
+    banked_attempts: int = 0
 
     @property
     def running(self) -> bool:
@@ -64,6 +69,10 @@ class Job:
 
     def progress(self, goal: int | None = None) -> str:
         """How far along this job is, in a few characters.
+
+        Counts from the last time the round count was changed, not from the
+        start of the run: asking for ten more means the ten are what is being
+        counted.
 
         Args:
             goal: The target as it stands now. Passed in rather than read off
@@ -75,7 +84,12 @@ class Job:
             return ""
         if goal is None:
             goal = self.target
-        return f"{self.done}/{goal if goal else '∞'}, попытка {self.attempt}"
+        done = self.completed - self.banked
+        attempt = self.attempt - self.banked_attempts
+        counted = f"{done}/{goal if goal else '∞'}"
+        # Straight after a change there is no attempt to number yet, and
+        # "попытка 0" reads like a fault rather than like a fresh start.
+        return f"{counted}, попытка {attempt}" if attempt >= 1 else counted
 
 
 class Controller:
@@ -291,6 +305,8 @@ class Controller:
         if self.config_path is None:
             return "не задан файл настроек"
 
+        before = self.configs[account].maze_rounds
+
         changes: dict[str, object] = {}
         for key, (label, kind) in self.EDITABLE.items():
             if key not in values:
@@ -305,7 +321,25 @@ class Controller:
             else:
                 changes[key] = raw
 
-        return self._write_account(account, changes)
+        problem = self._write_account(account, changes)
+        if not problem and self.configs[account].maze_rounds != before:
+            self._restart_the_count(account)
+        return problem
+
+    def _restart_the_count(self, account: str) -> None:
+        """Count a changed round target from here rather than from the start.
+
+        Asking for ten more while two are done means ten more, so both the
+        progress and what the run aims for start again from this moment.
+        """
+        job = self.jobs.get(account)
+        if job is None or not job.running or job.action != "maze":
+            return
+        job.banked, job.banked_attempts = job.completed, job.attempt
+        logger.info(
+            "%s: round count changed; counting from %d done", account, job.completed
+        )
+        self.on_progress()
 
     def _write_account(self, account: str, changes: dict[str, object]) -> str:
         """Apply changes to one account in the configuration file."""
@@ -461,18 +495,23 @@ class Controller:
             if rounds is not None:
                 return rounds
             config = self.configs.get(job.account)
-            return config.maze_rounds if config else 0
+            asked = config.maze_rounds if config else 0
+            if not asked:
+                return 0
+            # Counted from where the count stood when it was last changed:
+            # ten means ten more, not ten including what is already done.
+            return job.banked + asked
 
         def collect_what_ripened() -> None:
             # After each maze, not only at the end: a tier cleared mid-run
             # leaves a reward waiting, and until it is taken the next tier does
             # not appear, so the remaining mazes would count towards nothing.
             nonlocal taken
-            job.done += 1
+            job.completed += 1
             taken += bot.collect()
 
         def note_attempt(attempt: int, completed: int, goal: int) -> None:
-            job.attempt, job.done, job.target = attempt, completed, goal
+            job.attempt, job.completed, job.target = attempt, completed, goal
             self.on_progress()
 
         done = bot.maze.solve(

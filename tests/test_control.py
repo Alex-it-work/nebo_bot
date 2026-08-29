@@ -383,25 +383,25 @@ class TestProgress:
         assert Job(account="a", action="maze").progress(9) == ""
 
     def test_reports_how_many_are_done_and_which_attempt(self):
-        job = Job(account="a", action="maze", done=3, target=9, attempt=27)
+        job = Job(account="a", action="maze", completed=3, target=9, attempt=27)
         assert job.progress(9) == "3/9, попытка 27"
 
     def test_an_open_ended_run_shows_no_target(self):
-        job = Job(account="a", action="maze", done=2, target=0, attempt=5)
+        job = Job(account="a", action="maze", completed=2, target=0, attempt=5)
         assert job.progress(0) == "2/∞, попытка 5"
 
     def test_only_the_maze_reports_progress(self):
-        job = Job(account="a", action="collect", done=1, target=2, attempt=3)
+        job = Job(account="a", action="collect", completed=1, target=2, attempt=3)
         assert job.progress(2) == ""
 
     def test_the_target_shown_is_the_one_asked_for_now(self, controller):
         # It used to be whatever the last attempt started with, so changing
         # the number left the old one on screen until the next attempt.
-        job = Job(account="Первый", action="maze", done=3, target=9, attempt=27)
+        job = Job(account="Первый", action="maze", completed=3, target=9, attempt=27)
         assert job.progress(14) == "3/14, попытка 27"
 
     def test_the_status_follows_the_saved_setting(self, controller, tmp_path):
-        job = Job(account="Первый", action="maze", done=3, target=9, attempt=27)
+        job = Job(account="Первый", action="maze", completed=3, target=9, attempt=27)
         job.thread = threading.Thread(target=lambda: time.sleep(0.4), daemon=True)
         job.thread.start()
         controller.jobs["Первый"] = job
@@ -415,7 +415,7 @@ class TestProgress:
 
     def test_a_pinned_count_is_not_overridden_by_the_setting(self, controller):
         job = Job(account="Первый", action="maze", asked_rounds=4,
-                  done=1, target=4, attempt=7)
+                  completed=1, target=4, attempt=7)
         job.thread = threading.Thread(target=lambda: time.sleep(0.4), daemon=True)
         job.thread.start()
         controller.jobs["Первый"] = job
@@ -488,3 +488,76 @@ class TestHandingOverTheGame:
         # Logging out would drop the player out of the game mid-click.
         job = Job(account="a", action="maze")
         assert job.handed_over is False
+
+
+class TestChangingTheCountMidRun:
+    """Asking for ten more means ten more, counted from that moment."""
+
+    def _running_job(self, controller, **fields):
+        job = Job(account="Первый", action="maze", **fields)
+        job.thread = threading.Thread(target=lambda: time.sleep(0.6), daemon=True)
+        job.thread.start()
+        controller.jobs["Первый"] = job
+        return job
+
+    def test_the_progress_restarts_from_the_change(self):
+        job = Job(account="a", action="maze", completed=5, attempt=40,
+                  banked=5, banked_attempts=40)
+        # No attempt to number yet: "попытка 0" would read like a fault.
+        assert job.progress(10) == "0/10"
+
+    def test_it_counts_up_again_afterwards(self):
+        job = Job(account="a", action="maze", completed=7, attempt=52,
+                  banked=5, banked_attempts=40)
+        assert job.progress(10) == "2/10, попытка 12"
+
+    def test_nothing_is_banked_before_the_first_change(self):
+        job = Job(account="a", action="maze", completed=3, attempt=27)
+        assert job.progress(9) == "3/9, попытка 27"
+
+    def test_changing_the_setting_banks_what_is_done(self, controller, tmp_path):
+        path = tmp_path / "c.yml"
+        path.write_text(
+            "accounts:\n- username: Первый\n  password: p\n  maze_rounds: 7\n",
+            encoding="utf-8",
+        )
+        controller.config_path = str(path)
+        controller.configs["Первый"] = replace(
+            controller.configs["Первый"], maze_rounds=7
+        )
+        job = self._running_job(controller, completed=2, attempt=30)
+        try:
+            assert controller.update_account("Первый", {"maze_rounds": "10"}) == ""
+            assert (job.banked, job.banked_attempts) == (2, 30)
+            assert controller.status("Первый") == "Пройти лабиринт: 0/10"
+        finally:
+            job.thread.join()
+
+    def test_saving_the_same_number_banks_nothing(self, controller, tmp_path):
+        path = tmp_path / "c.yml"
+        path.write_text(
+            "accounts:\n- username: Первый\n  password: p\n  maze_rounds: 7\n",
+            encoding="utf-8",
+        )
+        controller.config_path = str(path)
+        controller.configs["Первый"] = replace(
+            controller.configs["Первый"], maze_rounds=7
+        )
+        job = self._running_job(controller, completed=2, attempt=30)
+        try:
+            controller.update_account("Первый", {"maze_rounds": "7"})
+            assert job.banked == 0
+        finally:
+            job.thread.join()
+
+    def test_an_idle_account_has_nothing_to_bank(self, controller, tmp_path):
+        path = tmp_path / "c.yml"
+        path.write_text(
+            "accounts:\n- username: Первый\n  password: p\n  maze_rounds: 7\n",
+            encoding="utf-8",
+        )
+        controller.config_path = str(path)
+        controller.configs["Первый"] = replace(
+            controller.configs["Первый"], maze_rounds=7
+        )
+        assert controller.update_account("Первый", {"maze_rounds": "10"}) == ""
