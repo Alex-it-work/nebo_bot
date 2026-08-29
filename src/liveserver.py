@@ -152,6 +152,14 @@ _OVERVIEW = """<!doctype html><meta charset="utf-8"><title>Боты играют
    if (row) chosen_rounds[row.dataset.name] = field.value;
  });
 
+ // Scrolling the page with the pointer over a number field makes the browser
+ // change its value, silently and without anyone meaning to. Now that the
+ // field is saved, that turned a scroll past the table into a rewritten
+ // setting: nine rounds quietly became twelve.
+ document.addEventListener('wheel', function (event) {
+   if (event.target.type === 'number') event.preventDefault();
+ }, {passive: false});
+
  // Saved as soon as the field is left, so it survives a reload, a trip to a
  // profile page, and a restart. Keeping it in the browser only was why the
  // number kept coming back as 1.
@@ -161,12 +169,22 @@ _OVERVIEW = """<!doctype html><meta charset="utf-8"><title>Боты играют
    var row = field.closest('tr[data-name]');
    if (!row) return;
    var name = row.dataset.name;
+   // Nothing to save when it already says that; a write nobody asked for is
+   // how a setting drifts without anyone seeing it happen.
+   if (field.value === String(saved_rounds[name])) {
+     delete chosen_rounds[name];
+     return;
+   }
    field.classList.add('saving');
    post('rounds/' + encodeURIComponent(name) + '?rounds=' + field.value)
      .then(function (response) { return response.text(); })
      .then(function (text) {
        field.classList.remove('saving');
-       if (text === 'сохранено') { delete chosen_rounds[name]; return; }
+       if (text === 'сохранено') {
+         saved_rounds[name] = field.value;
+         delete chosen_rounds[name];
+         return;
+       }
        field.classList.add('bad');
        alert(text);
      });
@@ -189,6 +207,8 @@ _OVERVIEW = """<!doctype html><meta charset="utf-8"><title>Боты играют
  // What is being typed right now, before it has been saved. Cleared once the
  // server confirms, after which the saved value is the one shown.
  var chosen_rounds = {};
+ // What the file says, so a "change" that changes nothing is not written back.
+ var saved_rounds = {};
  var row_by_name = {};
 
  function field(form, key, label, value, type) {
@@ -320,6 +340,7 @@ _OVERVIEW = """<!doctype html><meta charset="utf-8"><title>Боты играют
      setText(cells[3], account.when);
 
      var rounds = cells[4].querySelector('input');
+     saved_rounds[account.name] = account.rounds;
      // Only touch the field when nobody is typing in it.
      if (document.activeElement !== rounds && chosen_rounds[account.name] === undefined) {
        rounds.value = account.rounds;
@@ -563,6 +584,10 @@ class LiveServer:
             def do_POST(self):  # noqa: N802 - name fixed by BaseHTTPRequestHandler
                 path, _, query = self.path.partition("?")
                 parts = [unquote(p) for p in path.split("/") if p]
+
+                # Every POST is somebody pressing something. Silence here left
+                # no way to tell who kept changing a saved round count.
+                logger.info("Panel: %s", self.path)
 
                 if server.controller is None:
                     self._send("<p>Управление недоступно", status=503)

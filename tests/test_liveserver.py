@@ -458,3 +458,22 @@ class TestRememberingTheRoundCount:
         script = get("", server)
         assert "addEventListener('change'" in script
         assert "'rounds/'" in script
+
+
+class TestTheFieldIsNotChangedByAccident:
+    """Saving the field made the browser's own quirks dangerous."""
+
+    def test_scrolling_cannot_change_a_number_field(self, server):
+        # A wheel over a number input changes it, so scrolling past the table
+        # rewrote a saved setting: nine rounds silently became twelve.
+        page = get("", server)
+        assert "addEventListener('wheel'" in page
+        assert "passive: false" in page
+
+    def test_a_change_that_changes_nothing_is_not_written(self, server):
+        page = get("", server)
+        assert "String(saved_rounds[name])" in page
+
+    def test_the_saved_value_is_tracked(self, server):
+        page = get("", server)
+        assert "saved_rounds[account.name] = account.rounds" in page

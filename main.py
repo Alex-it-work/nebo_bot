@@ -23,6 +23,11 @@ logger = logging.getLogger(__name__)
 
 _LOG_FORMAT = "%(asctime)s - %(threadName)s - %(levelname)s - %(message)s"
 
+# How many accounts may play at the same time. Well short of the thirty that
+# exist, because thirty sessions from one address at one moment is not what
+# thirty separate players look like.
+AT_ONCE = 5
+
 
 def force_utf8_output() -> None:
     """Make stdout and stderr carry Cyrillic safely.
@@ -78,9 +83,9 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
         "--parallel",
         nargs="?",
         type=int,
-        const=3,
+        const=AT_ONCE,
         metavar="N",
-        help="run accounts at the same time, at most N of them (default 3). "
+        help=f"run accounts at the same time, at most N of them (default {AT_ONCE}). "
              "Thirty at once is a very different load than one player",
     )
     parser.add_argument(
@@ -340,7 +345,7 @@ def main(argv: list[str] | None = None) -> int:
     setup_logging(configs[0], [config.username for config in configs])
 
     if args.panel:
-        return run_panel(configs, args.parallel or 3, args.config)
+        return run_panel(configs, args.parallel or AT_ONCE, args.config)
     logger.info("Running %d account(s)", len(configs))
 
     results: dict[str, bool] = {}

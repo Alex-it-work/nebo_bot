@@ -74,9 +74,11 @@ class TestWandering:
 
 class TestWrongTurns:
     def test_comes_back_home_afterwards(self):
-        # Rarer than plain wandering by design, so give it several rolls.
+        # Rarer than plain wandering by design, so give it plenty of rolls.
+        # Forty of them failed about once every seventy runs, which is a test
+        # that cries wolf rather than one that catches anything.
         wanderer, session = make_wanderer(chance=1.0)
-        assert any(wanderer.maybe_wrong_turn() for _ in range(40))
+        assert any(wanderer.maybe_wrong_turn() for _ in range(300))
         assert session.urls[-1].endswith("/home")
 
     def test_takes_two_requests_and_no_more(self):
