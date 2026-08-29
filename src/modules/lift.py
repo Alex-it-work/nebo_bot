@@ -69,14 +69,12 @@ class LiftBot:
     def __init__(self, auth: Auth, config: Config):
         """Initialise with an authenticated session."""
         self.session = auth.session
-        self.human = auth.human
         self.config = config
 
     def fetch(self) -> tuple[BeautifulSoup, str]:
         """Load the lift page, returning it with the URL it came from."""
         response = self.session.get(self.config.url("/lift"), timeout=self.config.timeout)
         response.raise_for_status()
-        self.human.pause_page_load()
         return wicket.parse(response.text), response.url
 
     def state(self, soup: BeautifulSoup) -> LiftState:
@@ -114,7 +112,6 @@ class LiftBot:
         if not urls:
             return False
 
-        self.human.pause()
         response = self.session.get(urls[0], timeout=self.config.timeout)
         response.raise_for_status()
         logger.info("Hid the city announcement")
@@ -155,7 +152,6 @@ class LiftBot:
                 logger.info("Lift: nothing to press")
                 break
 
-            self.human.pause()
             response = self.session.get(url, timeout=self.config.timeout)
             response.raise_for_status()
             presses += 1
@@ -184,7 +180,6 @@ class LiftBot:
             logger.info("Lift: no paid delivery offered")
             return False
 
-        self.human.pause()
         response = self.session.get(url, timeout=self.config.timeout)
         response.raise_for_status()
         logger.info("Lift: delivered everyone for a bak")

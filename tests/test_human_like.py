@@ -121,3 +121,37 @@ class TestActiveHours:
         window = (time(22, 0), time(2, 0))
         moment = datetime.strptime(f"2026-08-18 {now}", "%Y-%m-%d %H:%M")
         assert within_active_hours(window, moment) is expected
+
+
+class TestMultiplierScope:
+    """A multiplier stretches the thinking, never the stepping away."""
+
+    def test_a_multiplier_stretches_an_ordinary_pause(self):
+        delays = Delays(min_seconds=2, max_seconds=2.0001, long_pause_chance=0)
+        human = HumanBehavior(delays)
+        assert human.delay(4) == pytest.approx(4 * human.delay(1), rel=0.05)
+
+    def test_a_break_is_not_multiplied(self):
+        # Four times a two-minute break is eight minutes of nothing, which is
+        # exactly how a settling pause after login froze a run.
+        delays = Delays(
+            min_seconds=1,
+            max_seconds=1.0001,
+            long_pause_chance=1.0,
+            long_pause_min=100,
+            long_pause_max=100,
+        )
+        human = HumanBehavior(delays)
+        assert human.delay(4) == pytest.approx(104, abs=1)
+
+    def test_the_worst_case_stays_bounded(self):
+        delays = Delays(
+            min_seconds=1.5,
+            max_seconds=3.5,
+            long_pause_chance=1.0,
+            long_pause_min=20,
+            long_pause_max=120,
+        )
+        human = HumanBehavior(delays)
+        # Five is the largest multiplier in use, on the prize screen.
+        assert max(human.delay(5) for _ in range(2000)) < 200

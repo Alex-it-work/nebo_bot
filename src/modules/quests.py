@@ -139,7 +139,6 @@ class QuestBot:
         """Load the task page."""
         response = self.session.get(self.config.url("/quests"), timeout=self.config.timeout)
         response.raise_for_status()
-        self.human.pause_page_load()
         return wicket.parse(response.text)
 
     def parse(self, soup: BeautifulSoup) -> list[Quest]:
@@ -249,13 +248,13 @@ class QuestBot:
         while True:
             response = self.session.get(self.config.url(path), timeout=self.config.timeout)
             response.raise_for_status()
-            self.human.pause_page_load()
 
             urls = self.claimable(wicket.parse(response.text), response.url)
             if not urls:
                 break
 
-            # Read the page before taking anything, as a player would.
+            # Longer than the session's own pause: a reward is read twice
+            # before it is taken.
             self.human.pause(_BEFORE_CLAIM_MULTIPLIER)
             claimed = self.session.get(urls[0], timeout=self.config.timeout)
             claimed.raise_for_status()

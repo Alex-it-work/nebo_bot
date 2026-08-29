@@ -62,7 +62,6 @@ class HumansBot:
     def __init__(self, auth: Auth, config: Config):
         """Initialise with an authenticated session."""
         self.session = auth.session
-        self.human = auth.human
         self.config = config
 
     def fetch(self, page: int = 1) -> tuple[BeautifulSoup, str]:
@@ -70,7 +69,6 @@ class HumansBot:
         url = self.config.url("/humans") + (f"?page={page}" if page > 1 else "")
         response = self.session.get(url, timeout=self.config.timeout)
         response.raise_for_status()
-        self.human.pause_page_load()
         return wicket.parse(response.text), response.url
 
     def residents(self, soup: BeautifulSoup, page_url: str) -> list[Resident]:
@@ -113,7 +111,6 @@ class HumansBot:
         """
         response = self.session.get(resident.page_url, timeout=self.config.timeout)
         response.raise_for_status()
-        self.human.pause_page_load()
 
         urls = wicket.find_links_containing(
             wicket.parse(response.text), _EVICT_COMPONENT, response.url
@@ -122,7 +119,6 @@ class HumansBot:
             logger.debug("No eviction link for %s", resident.name)
             return False
 
-        self.human.pause()
         self.session.get(urls[0], timeout=self.config.timeout).raise_for_status()
         logger.info("Evicted %s (skill %d)", resident.name, resident.skill)
         return True
@@ -200,7 +196,6 @@ class HumansBot:
             logger.info("No bulk eviction offered")
             return False
 
-        self.human.pause()
         self.session.get(url, timeout=self.config.timeout).raise_for_status()
         logger.info("Bulk evicted everyone below skill %d", _BULK_FILTER_KEEPS)
         return True

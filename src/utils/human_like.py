@@ -10,15 +10,22 @@ reaction times are: a dense cluster of short gaps with a thin tail of long
 ones. On top of that a small fraction of actions get a real break, and both
 the session length and the hours of play can be capped — a bot that plays
 without pause and without end is the easiest kind to notice.
+
+The pacing is applied by :class:`HumanSession`, which every module fetches
+through, so it covers every action in the game rather than the ones whose
+author remembered to ask for it.
 """
 
 from __future__ import annotations
 
+import contextlib
 import logging
 import math
 import random
 import time as time_module
 from datetime import datetime, time
+
+import requests
 
 from ..config import Delays
 
@@ -42,12 +49,18 @@ class HumanBehavior:
         """
         self.delays = delays or Delays()
 
-    def delay(self) -> float:
+    def delay(self, multiplier: float = 1.0) -> float:
         """Return a randomised pause between actions, in seconds.
 
         The configured minimum and maximum act as the 10th and 90th
         percentiles of a log-normal draw, so most pauses land between them and
         a few run noticeably longer.
+
+        Args:
+            multiplier: Scales the thinking time only. Stepping away is an
+                event of its own and is never scaled: multiplying a two-minute
+                break by the four-fold settling pause after a login left the
+                bot motionless for eight minutes with nothing in the log.
         """
         low, high = self.delays.min_seconds, self.delays.max_seconds
         if high <= 0:
@@ -63,11 +76,15 @@ class HumanBehavior:
             sigma = math.log(high / low) / _P10_TO_P90
             base = random.lognormvariate(mu, sigma)
 
-        if random.random() < self.delays.long_pause_chance:
-            # Stepped away for a moment.
-            base += random.uniform(self.delays.long_pause_min, self.delays.long_pause_max)
+        if high > _FLOOR_SECONDS:
+            base = max(_FLOOR_SECONDS, base)
+        thinking = base * multiplier
 
-        return max(_FLOOR_SECONDS, base) if high > _FLOOR_SECONDS else base
+        if random.random() < self.delays.long_pause_chance:
+            # Stepped away for a moment. Added at its own scale.
+            thinking += random.uniform(self.delays.long_pause_min, self.delays.long_pause_max)
+
+        return thinking
 
     def page_load_delay(self) -> float:
         """Return a randomised page-reading pause, in seconds."""
@@ -80,11 +97,64 @@ class HumanBehavior:
             multiplier: Scales the pause; use a value above 1 after a setback,
                 where a person would naturally hesitate longer.
         """
-        time_module.sleep(self.delay() * multiplier)
+        time_module.sleep(self.delay(multiplier))
 
     def pause_page_load(self) -> None:
         """Sleep for :meth:`page_load_delay` seconds."""
         time_module.sleep(self.page_load_delay())
+
+
+class HumanSession(requests.Session):
+    """A session that paces itself, so no caller has to remember to.
+
+    Pacing used to be a convention: every place that fetched a page also had
+    to call :meth:`HumanBehavior.pause` before it and
+    :meth:`HumanBehavior.pause_page_load` after it. Conventions get forgotten.
+    Reading the key count between mazes fetched a page with no pause at all,
+    and every module added later would have had to know the rule.
+
+    So the pause moved into the session. Every request made through this one —
+    from any module, written or not yet written — is preceded by a pause for
+    thinking and followed by a pause for reading. There is nothing left to
+    forget, and the timing envelope is the same one the configuration sets.
+
+    Redirects are followed inside a single request and are not paced
+    separately, which is right: a browser follows them without the reader
+    noticing.
+    """
+
+    def __init__(self, human: "HumanBehavior"):
+        """Wrap a pacing policy around an ordinary session.
+
+        Args:
+            human: Supplies the pauses. Its delays come from the config.
+        """
+        super().__init__()
+        self.human = human
+        self.paced = True
+
+    def request(self, method, url, *args, **kwargs):  # type: ignore[override]
+        """Pause, make the request, then pause again as a reader would."""
+        if not self.paced:
+            return super().request(method, url, *args, **kwargs)
+
+        self.human.pause()
+        response = super().request(method, url, *args, **kwargs)
+        self.human.pause_page_load()
+        return response
+
+    @contextlib.contextmanager
+    def unpaced(self):
+        """Run a block without pacing.
+
+        For requests a player never makes — a health check, a test — not for
+        hurrying the game along.
+        """
+        previous, self.paced = self.paced, False
+        try:
+            yield self
+        finally:
+            self.paced = previous
 
 
 class SessionBudget:

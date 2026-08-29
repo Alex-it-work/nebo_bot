@@ -54,6 +54,8 @@ _STYLE = """
  .settings input[type=checkbox]{width:auto}
  input{font:inherit;width:4rem;padding:.2rem .3rem;border:1px solid #4775a7;
        border-radius:.25rem;background:#043264;color:#ddd}
+ input.saving{border-color:#ffdf8c}
+ input.bad{border-color:#c44}
  .add input{width:11rem}
  .add{margin-top:1.5rem;padding:.8rem;background:#043264;border-radius:.4rem;
       max-width:60rem;display:flex;gap:.5rem;align-items:center;flex-wrap:wrap}
@@ -150,6 +152,26 @@ _OVERVIEW = """<!doctype html><meta charset="utf-8"><title>Боты играют
    if (row) chosen_rounds[row.dataset.name] = field.value;
  });
 
+ // Saved as soon as the field is left, so it survives a reload, a trip to a
+ // profile page, and a restart. Keeping it in the browser only was why the
+ // number kept coming back as 1.
+ document.addEventListener('change', function (event) {
+   var field = event.target;
+   if (field.type !== 'number') return;
+   var row = field.closest('tr[data-name]');
+   if (!row) return;
+   var name = row.dataset.name;
+   field.classList.add('saving');
+   post('rounds/' + encodeURIComponent(name) + '?rounds=' + field.value)
+     .then(function (response) { return response.text(); })
+     .then(function (text) {
+       field.classList.remove('saving');
+       if (text === 'сохранено') { delete chosen_rounds[name]; return; }
+       field.classList.add('bad');
+       alert(text);
+     });
+ });
+
  document.getElementById('add').addEventListener('submit', function (event) {
    event.preventDefault();
    var note = document.getElementById('added');
@@ -164,8 +186,8 @@ _OVERVIEW = """<!doctype html><meta charset="utf-8"><title>Боты играют
 
  var open_settings = null;
  var last_state = [];
- // The table is rebuilt on every event; without remembering what was typed,
- // the number would snap back to the saved one and look like it was ignored.
+ // What is being typed right now, before it has been saved. Cleared once the
+ // server confirms, after which the saved value is the one shown.
  var chosen_rounds = {};
  var row_by_name = {};
 
@@ -551,6 +573,8 @@ class LiveServer:
                     self._send(problem or "удалён", status=400 if problem else 200)
                 elif len(parts) == 2 and parts[0] == "settings":
                     self._settings(parts[1])
+                elif len(parts) == 2 and parts[0] == "rounds":
+                    self._rounds(parts[1], parse_qs(query).get("rounds", [""])[0])
                 elif parts == ["stop-all"]:
                     stopped = server.controller.stop_all()
                     self._send(f"<p>Остановлено: {stopped}")
@@ -609,6 +633,19 @@ class LiveServer:
                     return
                 server.channel(fields["username"].strip())
                 self._send("добавлен")
+
+            def _rounds(self, account: str, wanted: str):
+                """Save how many mazes this account plays.
+
+                The number used to live only in the browser, so opening a
+                profile and coming back showed the saved 1 again. It is a
+                setting like any other and belongs in the file.
+                """
+                if not wanted.isdigit() or int(wanted) < 1:
+                    self._send("нужно целое число от 1", status=400)
+                    return
+                problem = server.controller.update_account(account, {"maze_rounds": wanted})
+                self._send(problem or "сохранено", status=400 if problem else 200)
 
             def _settings(self, account: str):
                 """Save the settings form for one account."""

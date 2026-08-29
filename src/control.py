@@ -77,6 +77,10 @@ class Controller:
         self.stagger = stagger
         self._permit = threading.Semaphore(max(1, at_once))
         self._lock = threading.Lock()
+        # Every save rewrites the whole file. With thirty accounts on one page
+        # two saves landing together would read the same copy and one would be
+        # lost, so writes are serialised.
+        self._file_lock = threading.RLock()
 
     def names(self) -> list[str]:
         """Every account this controller knows about, in file order."""
@@ -114,6 +118,11 @@ class Controller:
         if self.config_path is None:
             return "не задан файл настроек"
 
+        with self._file_lock:
+            return self._append_account(username, password)
+
+    def _append_account(self, username: str, password: str) -> str:
+        """Write one new account into the configuration file."""
         path = pathlib.Path(self.config_path)
         try:
             raw = yaml.safe_load(path.read_text(encoding="utf-8")) or {}
@@ -193,6 +202,11 @@ class Controller:
 
     def _write_account(self, account: str, changes: dict[str, object]) -> str:
         """Apply changes to one account in the configuration file."""
+        with self._file_lock:
+            return self._write_account_locked(account, changes)
+
+    def _write_account_locked(self, account: str, changes: dict[str, object]) -> str:
+        """Rewrite the file with one account's changes applied."""
         path = pathlib.Path(self.config_path)
         try:
             raw = yaml.safe_load(path.read_text(encoding="utf-8")) or {}
@@ -243,12 +257,13 @@ class Controller:
 
         path = pathlib.Path(self.config_path)
         try:
-            raw = yaml.safe_load(path.read_text(encoding="utf-8")) or {}
-            entries = raw.get("accounts") or []
-            raw["accounts"] = [e for e in entries if e.get("username") != account]
-            path.write_text(
-                yaml.safe_dump(raw, allow_unicode=True, sort_keys=False), encoding="utf-8"
-            )
+            with self._file_lock:
+                raw = yaml.safe_load(path.read_text(encoding="utf-8")) or {}
+                entries = raw.get("accounts") or []
+                raw["accounts"] = [e for e in entries if e.get("username") != account]
+                path.write_text(
+                    yaml.safe_dump(raw, allow_unicode=True, sort_keys=False), encoding="utf-8"
+                )
         except (OSError, yaml.YAMLError) as exc:
             return f"не сохранилось: {exc}"
 

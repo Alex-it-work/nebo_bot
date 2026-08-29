@@ -221,7 +221,8 @@ class FakeController:
 
 
 def post(path: str, server: LiveServer):
-    quoted = urllib.parse.quote(path, safe="/")
+    # "?" and "=" stay literal, or the query would arrive as part of the path.
+    quoted = urllib.parse.quote(path, safe="/?=&")
     request = urllib.request.Request(server.url + quoted, method="POST", data=b"")
     with urllib.request.urlopen(request, timeout=5) as response:
         return response.status, response.read().decode("utf-8")
@@ -414,3 +415,46 @@ class TestPanelScriptIsValid:
         assert script.count("{") == script.count("}")
         assert script.count("(") == script.count(")")
         assert script.count("'") % 2 == 0
+
+
+class TestRememberingTheRoundCount:
+    """The number typed into the table has to outlive the page showing it."""
+
+    def test_saving_reaches_the_controller(self, server):
+        controller = FakeController()
+        server.attach(controller)
+        status, body = post("rounds/Первый?rounds=9", server)
+        assert status == 200 and body == "сохранено"
+        assert controller.updated == ("Первый", {"maze_rounds": "9"})
+
+    def test_it_is_saved_as_a_setting_not_as_a_one_off(self, server):
+        # Passing it with the run only would leave the file saying 1, which is
+        # what came back every time the page was reopened.
+        controller = FakeController()
+        server.attach(controller)
+        post("rounds/Первый?rounds=9", server)
+        assert controller.started == []
+
+    def test_a_missing_number_is_refused(self, server):
+        server.attach(FakeController())
+        with pytest.raises(urllib.error.HTTPError) as raised:
+            post("rounds/Первый", server)
+        assert raised.value.code == 400
+
+    def test_zero_is_refused(self, server):
+        server.attach(FakeController())
+        with pytest.raises(urllib.error.HTTPError) as raised:
+            post("rounds/Первый?rounds=0", server)
+        assert raised.value.code == 400
+
+    def test_nonsense_is_refused(self, server):
+        server.attach(FakeController())
+        with pytest.raises(urllib.error.HTTPError) as raised:
+            post("rounds/Первый?rounds=девять", server)
+        assert raised.value.code == 400
+
+    def test_the_field_is_saved_when_it_is_left(self, server):
+        # An "input" listener alone only remembered it in this one page.
+        script = get("", server)
+        assert "addEventListener('change'" in script
+        assert "'rounds/'" in script

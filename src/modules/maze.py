@@ -292,7 +292,6 @@ class MazeBot:
                     if offer and (keys is None or keys >= offer[1]):
                         url, price = offer
                         logger.info("Buying the finish for %d keys", price)
-                        self.human.pause()
                         bought = self._get(url)
                         if self.is_solved(wicket.parse(bought.text)):
                             return True
@@ -333,8 +332,6 @@ class MazeBot:
 
             choice = random.choice(sorted(doors))
 
-            # "Think" before committing to a door.
-            self.human.pause()
             pending = (level, choice)
             response = self._get(doors[choice])
 
@@ -342,8 +339,11 @@ class MazeBot:
         return False
 
     def _get(self, url: str) -> requests.Response:
-        """Fetch a page, raise on HTTP errors, then pause as a reader would."""
+        """Fetch a page and raise on HTTP errors.
+
+        The pauses either side are the session's; see
+        :class:`~src.utils.human_like.HumanSession`.
+        """
         response = self.session.get(url, timeout=self.config.timeout)
         response.raise_for_status()
-        self.human.pause_page_load()
         return response

@@ -10,7 +10,7 @@ from .. import wicket
 from ..liveserver import LiveServer
 from ..recorder import PageRecorder
 from ..config import Config
-from ..utils.human_like import HumanBehavior
+from ..utils.human_like import HumanBehavior, HumanSession
 from ..utils.wandering import Wanderer
 
 logger = logging.getLogger(__name__)
@@ -55,7 +55,9 @@ class Auth:
         self.human = HumanBehavior(config.delays)
         self.wanderer: Wanderer | None = None
 
-        self.session = session or requests.Session()
+        # Paced by construction: every module borrows this session, so every
+        # request any of them makes is spaced out without having to ask.
+        self.session = session or HumanSession(self.human)
         self.session.headers.update(_DEFAULT_HEADERS)
 
         self.wanderer = Wanderer(self.session, config, self.human)
@@ -100,15 +102,11 @@ class Auth:
         logger.info("Logging in as %s", self.config.username)
 
         try:
-            self.human.pause()
             page = self._get(self.config.url("/login"))
 
             soup = wicket.parse(page.text)
             form = wicket.parse_form(wicket.find_form(soup, "loginForm"), page.url)
             logger.debug("Login form action: %s", form.action_url)
-
-            # Read the page as a human would before typing.
-            self.human.pause_page_load()
 
             response = self.session.post(
                 form.action_url,
@@ -186,7 +184,6 @@ class Auth:
         logger.info("Logging out")
 
         try:
-            self.human.pause()
             page = self._get(self.config.url("/home"))
 
             logout_url = wicket.find_link_href(wicket.parse(page.text), "Выход", page.url)

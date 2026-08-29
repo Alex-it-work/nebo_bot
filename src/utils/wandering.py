@@ -96,7 +96,6 @@ class Wanderer:
         if not self._open(random.choice(_GLANCE_PAGES)):
             return False
 
-        self.human.pause()
         self._open("/home")
         logger.debug("Took a wrong turn and came back")
         return True
@@ -104,10 +103,8 @@ class Wanderer:
     def _open(self, path: str) -> bool:
         """Fetch one page, forgiving failures."""
         try:
-            self.human.pause()
             response = self.session.get(self.config.url(path), timeout=self.config.timeout)
             response.raise_for_status()
-            self.human.pause_page_load()
             return True
         except requests.RequestException as exc:
             # Idle browsing must never be able to break a run.
