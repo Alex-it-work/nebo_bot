@@ -106,14 +106,26 @@ class TestAuthSuppliesAPacedSession:
 class TestNothingBypassesTheSession:
     """The guarantee only holds while every module fetches through Auth's session."""
 
+    # human_like.py defines the paced session. control.py builds one unpaced
+    # session on purpose, for the profile a person is playing by hand: nobody
+    # should have to wait out the bot's thinking time to click a link.
+    ALLOWED = {"human_like.py", "control.py"}
+
     def test_no_module_builds_its_own_session(self):
         offenders = [
             path.relative_to(SOURCE_ROOT).as_posix()
             for path in SOURCE_ROOT.rglob("*.py")
             if "requests.Session()" in path.read_text(encoding="utf-8")
-            and path.name != "human_like.py"
+            and path.name not in self.ALLOWED
         ]
         assert offenders == [], f"these would fetch unpaced: {offenders}"
+
+    def test_the_one_unpaced_session_is_only_for_hand_play(self):
+        source = (SOURCE_ROOT / "control.py").read_text(encoding="utf-8")
+        where = source.index("requests.Session()")
+        assert "_copy_of" in source[max(0, where - 400):where], (
+            "an unpaced session appeared somewhere other than hand-play"
+        )
 
     def test_no_module_uses_the_module_level_requests_helpers(self):
         # requests.get() opens a fresh unpaced connection every time.

@@ -4,11 +4,14 @@ from __future__ import annotations
 
 import threading
 import time
+from dataclasses import replace
 
 import pytest
+import requests
 
 from src.config import Config
 from src.control import ACTIONS, Controller, Job
+from src.utils.human_like import HumanSession
 
 
 @pytest.fixture
@@ -377,64 +380,111 @@ class TestProgress:
     """The table said "Пройти лабиринт" for an hour and nothing more."""
 
     def test_nothing_to_report_before_the_first_attempt(self):
-        assert Job(account="a", action="maze").progress == ""
+        assert Job(account="a", action="maze").progress(9) == ""
 
     def test_reports_how_many_are_done_and_which_attempt(self):
         job = Job(account="a", action="maze", done=3, target=9, attempt=27)
-        assert job.progress == "3/9, попытка 27"
+        assert job.progress(9) == "3/9, попытка 27"
 
     def test_an_open_ended_run_shows_no_target(self):
         job = Job(account="a", action="maze", done=2, target=0, attempt=5)
-        assert job.progress == "2/∞, попытка 5"
+        assert job.progress(0) == "2/∞, попытка 5"
 
     def test_only_the_maze_reports_progress(self):
         job = Job(account="a", action="collect", done=1, target=2, attempt=3)
-        assert job.progress == ""
+        assert job.progress(2) == ""
 
-    def test_the_status_carries_it(self, controller):
-        controller.jobs["Первый"] = job = Job(
-            account="Первый", action="maze", done=3, target=9, attempt=27
-        )
-        job.thread = threading.Thread(target=lambda: None)
+    def test_the_target_shown_is_the_one_asked_for_now(self, controller):
+        # It used to be whatever the last attempt started with, so changing
+        # the number left the old one on screen until the next attempt.
+        job = Job(account="Первый", action="maze", done=3, target=9, attempt=27)
+        assert job.progress(14) == "3/14, попытка 27"
+
+    def test_the_status_follows_the_saved_setting(self, controller, tmp_path):
+        job = Job(account="Первый", action="maze", done=3, target=9, attempt=27)
+        job.thread = threading.Thread(target=lambda: time.sleep(0.4), daemon=True)
         job.thread.start()
-        job.thread.join()
-        # A finished job reports its result, not its progress.
-        assert controller.status("Первый") == "готово"
+        controller.jobs["Первый"] = job
+        try:
+            controller.configs["Первый"] = replace(
+                controller.configs["Первый"], maze_rounds=14
+            )
+            assert controller.status("Первый") == "Пройти лабиринт: 3/14, попытка 27"
+        finally:
+            job.thread.join()
+
+    def test_a_pinned_count_is_not_overridden_by_the_setting(self, controller):
+        job = Job(account="Первый", action="maze", asked_rounds=4,
+                  done=1, target=4, attempt=7)
+        job.thread = threading.Thread(target=lambda: time.sleep(0.4), daemon=True)
+        job.thread.start()
+        controller.jobs["Первый"] = job
+        try:
+            controller.configs["Первый"] = replace(
+                controller.configs["Первый"], maze_rounds=14
+            )
+            assert controller.status("Первый") == "Пройти лабиринт: 1/4, попытка 7"
+        finally:
+            job.thread.join()
 
 
 class TestHandingOverTheGame:
-    """Opening the real profile from the panel."""
-
-    def test_the_link_carries_the_session_id(self):
-        session = type("S", (), {"cookies": [FakeCookie("JSESSIONID", "ABC123")]})()
-        config = Config(username="u", password="p")
-        url = Controller._url_for(config, session)
-        assert url.endswith("/home;jsessionid=ABC123")
-
-    def test_other_cookies_are_ignored(self):
-        session = type("S", (), {"cookies": [FakeCookie("login", "x"), FakeCookie("id", "y")]})()
-        assert Controller._url_for(Config(username="u", password="p"), session).startswith("не ")
+    """Playing a profile by hand, from the panel."""
 
     def test_an_unknown_account_is_refused(self, controller):
-        assert controller.game_url("Никто").startswith("не ")
+        assert controller.play_session("Никто").startswith("не ")
 
-    def test_a_running_account_hands_over_the_session_it_is_playing(self, controller):
-        session = type("S", (), {"cookies": [FakeCookie("JSESSIONID", "LIVE")]})()
-        bot = type("B", (), {"auth": type("A", (), {"session": session})()})()
+    def test_a_running_account_lends_its_cookies(self, controller):
+        source = requests.Session()
+        source.cookies.set("JSESSIONID", "LIVE", domain="nebo.mobi")
+        bot = type("B", (), {"auth": type("A", (), {"session": source})()})()
         job = Job(account="Первый", action="maze", bot=bot)
         job.thread = threading.Thread(target=lambda: time.sleep(0.5), daemon=True)
         job.thread.start()
         controller.jobs["Первый"] = job
         try:
-            assert controller.game_url("Первый").endswith(";jsessionid=LIVE")
-            # Signing in twice risks the game dropping one of the two.
+            session = controller.play_session("Первый")
+            assert session.cookies.get("JSESSIONID", domain="nebo.mobi") == "LIVE"
+            # Borrowed, not the same object: the bot keeps its own pacing.
+            assert session is not source
+            # Signing in twice risks the game dropping one of them.
             assert job.handed_over is True
         finally:
             job.thread.join()
+
+    def test_the_hand_session_is_not_paced(self, controller):
+        # A person clicking should not wait out the bot's thinking time.
+        source = requests.Session()
+        source.cookies.set("JSESSIONID", "LIVE", domain="nebo.mobi")
+        bot = type("B", (), {"auth": type("A", (), {"session": source})()})()
+        job = Job(account="Первый", action="maze", bot=bot)
+        job.thread = threading.Thread(target=lambda: time.sleep(0.5), daemon=True)
+        job.thread.start()
+        controller.jobs["Первый"] = job
+        try:
+            assert not isinstance(controller.play_session("Первый"), HumanSession)
+        finally:
+            job.thread.join()
+
+    def test_the_session_is_reused_rather_than_signed_in_again(self, controller):
+        source = requests.Session()
+        source.cookies.set("JSESSIONID", "LIVE", domain="nebo.mobi")
+        bot = type("B", (), {"auth": type("A", (), {"session": source})()})()
+        job = Job(account="Первый", action="maze", bot=bot)
+        job.thread = threading.Thread(target=lambda: time.sleep(0.5), daemon=True)
+        job.thread.start()
+        controller.jobs["Первый"] = job
+        try:
+            assert controller.play_session("Первый") is controller.play_session("Первый")
+        finally:
+            job.thread.join()
+
+    def test_forgetting_it_makes_the_next_open_start_over(self, controller):
+        controller._play_sessions["Первый"] = "held"
+        controller.forget_play_session("Первый")
+        assert "Первый" not in controller._play_sessions
 
     def test_a_handed_over_session_is_not_logged_out(self):
         # Logging out would drop the player out of the game mid-click.
         job = Job(account="a", action="maze")
         assert job.handed_over is False
-        job.handed_over = True
-        assert job.handed_over is True

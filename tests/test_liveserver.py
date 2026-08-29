@@ -8,6 +8,7 @@ import urllib.parse
 import urllib.request
 
 import pytest
+import requests
 
 from src.liveserver import LiveServer
 
@@ -180,6 +181,9 @@ class FakeController:
         self.stopped: list[str] = []
         self.busy: dict[str, str] = {}
         self.accept = True
+        self.opened = None
+        # What play_session hands back: a session, or why there is none.
+        self.session_answer = requests.Session()
 
     def names(self):
         return ["Первый", "Второй"]
@@ -211,9 +215,11 @@ class FakeController:
         self.added = (username, password)
         return ""
 
-    def game_url(self, account):
+    base_url = "https://nebo.mobi"
+
+    def play_session(self, account):
         self.opened = account
-        return f"https://nebo.mobi/home;jsessionid=FOR-{account}"
+        return self.session_answer
 
     def stop(self, account):
         self.stopped.append(account)
@@ -491,16 +497,19 @@ class TestOpeningTheRealProfile:
         page = get("watch/Первый", server)
         assert "Войти в игру" in page
 
-    def test_it_answers_with_a_link(self, server):
+    def test_it_answers_with_a_link_into_the_panel(self, server):
+        # Not a link to the game: the browser's own cookie for the site wins
+        # over a session id in the address, so it opened the wrong profile.
         controller = FakeController()
         server.attach(controller)
         status, body = post("open/Первый", server)
-        assert status == 200 and body.endswith(";jsessionid=FOR-Первый")
-        assert controller.opened == "Первый"
+        assert status == 200 and controller.opened == "Первый"
+        assert body.startswith("/play/") and body.endswith("/home")
+        assert "nebo.mobi" not in body
 
     def test_a_refusal_comes_back_as_a_message(self, server):
         controller = FakeController()
-        controller.game_url = lambda account: "не удалось войти в игру"
+        controller.session_answer = "не удалось войти в игру"
         server.attach(controller)
         with pytest.raises(urllib.error.HTTPError) as raised:
             post("open/Первый", server)

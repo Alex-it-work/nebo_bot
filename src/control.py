@@ -40,6 +40,9 @@ class Job:
 
     account: str
     action: str
+    # What the caller pinned, if anything. None means the saved setting
+    # decides, and keeps deciding while the run goes on.
+    asked_rounds: int | None = None
     thread: threading.Thread | None = None
     stopping: threading.Event = field(default_factory=threading.Event)
     finished: bool = False
@@ -59,13 +62,20 @@ class Job:
         """Whether the job is still going."""
         return self.thread is not None and self.thread.is_alive()
 
-    @property
-    def progress(self) -> str:
-        """How far along this job is, in a few characters."""
+    def progress(self, goal: int | None = None) -> str:
+        """How far along this job is, in a few characters.
+
+        Args:
+            goal: The target as it stands now. Passed in rather than read off
+                the job, because the job only learns it when the next attempt
+                begins — so changing the number left the display showing the
+                old one until then.
+        """
         if self.action != "maze" or not self.attempt:
             return ""
-        goal = str(self.target) if self.target else "∞"
-        return f"{self.done}/{goal}, попытка {self.attempt}"
+        if goal is None:
+            goal = self.target
+        return f"{self.done}/{goal if goal else '∞'}, попытка {self.attempt}"
 
 
 class Controller:
@@ -100,10 +110,19 @@ class Controller:
         self._file_lock = threading.RLock()
         # Set by the dashboard so progress reaches the table as it happens.
         self.on_progress = lambda: None
+        # Sessions for playing profiles by hand, one per account.
+        self._play_sessions: dict[str, object] = {}
 
     def names(self) -> list[str]:
         """Every account this controller knows about, in file order."""
         return list(self.configs)
+
+    @property
+    def base_url(self) -> str:
+        """Site root, which every account shares."""
+        for config in self.configs.values():
+            return config.base_url
+        return "https://nebo.mobi"
 
     def status(self, account: str) -> str:
         """A short word for what this account is doing."""
@@ -116,55 +135,76 @@ class Controller:
                 # looks identical to a stop that did nothing.
                 return "останавливаю…"
             label = ACTIONS.get(job.action, job.action)
-            return f"{label}: {job.progress}" if job.progress else label
+            goal = job.asked_rounds
+            if goal is None:
+                goal = self.rounds_for(account)
+            progress = job.progress(goal)
+            return f"{label}: {progress}" if progress else label
         return job.result or "готово"
 
-    def game_url(self, account: str) -> str:
-        """Return a link that opens this profile in an ordinary browser.
+    def play_session(self, account: str):
+        """Return a session for playing this profile by hand.
 
-        The site keeps the session id in the URL path as well as in a cookie,
-        which is how a browser that has never seen the session can join it.
-        Verified against the live site: a fresh session with no cookies at all
-        opened the authenticated home page from this link alone.
+        Handing the browser a link with the session id in it does not work:
+        the browser prefers its own nebo.mobi cookie and opens whichever
+        profile it last logged into. So the browsing is done here instead and
+        served through the proxy, and this is the session it uses.
 
-        A running account hands over the session it is already playing on,
-        because signing in twice risks the game dropping one of them. An idle
-        account gets a session of its own, opened for this.
+        The session is deliberately a plain one rather than the bot's paced
+        one: a person clicking should not wait out the bot's thinking time,
+        and pacing shared between the two would interleave badly.
 
         Returns:
-            The URL, or a message starting with "не " explaining why not.
+            A requests session, or a message starting with "не " saying why
+            there is none.
         """
         config = self.configs.get(account)
         if config is None:
             return "не найден такой профиль"
 
+        with self._lock:
+            existing = self._play_sessions.get(account)
+        if existing is not None:
+            return existing
+
         job = self.jobs.get(account)
         if job is not None and job.running and job.bot is not None:
+            # Already signed in; signing in again risks the game dropping one
+            # of the two. Borrow the cookies and leave the bot's own session
+            # to its own pacing.
             job.handed_over = True
-            return self._url_for(config, job.bot.auth.session)
+            session = self._copy_of(job.bot.auth.session)
+        else:
+            try:
+                from .modules.auth import Auth
 
-        try:
-            from .modules.auth import Auth
+                auth = Auth(config)
+                if not auth.login():
+                    return "не удалось войти в игру"
+            except Exception as exc:  # noqa: BLE001 - report, never crash the panel
+                logger.exception("%s: could not open the game", account)
+                return f"не получилось: {exc}"
+            session = self._copy_of(auth.session)
 
-            auth = Auth(config)
-            if not auth.login():
-                return "не удалось войти в игру"
-        except Exception as exc:  # noqa: BLE001 - report rather than crash the panel
-            logger.exception("%s: could not open the game", account)
-            return f"не получилось: {exc}"
-        return self._url_for(config, auth.session)
+        with self._lock:
+            self._play_sessions[account] = session
+        logger.info("%s: opened for playing by hand", account)
+        return session
+
+    def forget_play_session(self, account: str) -> None:
+        """Drop the hand-play session, so the next open signs in afresh."""
+        with self._lock:
+            self._play_sessions.pop(account, None)
 
     @staticmethod
-    def _url_for(config: Config, session) -> str:
-        """Build the handoff link from a logged-in session."""
-        session_id = next(
-            (c.value for c in session.cookies if c.name.upper() == "JSESSIONID"), None
-        )
-        if not session_id:
-            return "не нашлась сессия игры"
-        # This link is the session. It never leaves 127.0.0.1, and the panel
-        # must not be published as-is.
-        return config.url(f"/home;jsessionid={session_id}")
+    def _copy_of(source):
+        """A plain, unpaced session carrying the same cookies and headers."""
+        import requests
+
+        session = requests.Session()
+        session.headers.update(dict(source.headers))
+        session.cookies.update(source.cookies)
+        return session
 
     def rounds_for(self, account: str) -> int:
         """How many mazes this account plays when asked to play."""
@@ -354,7 +394,7 @@ class Controller:
             existing = self.jobs.get(account)
             if existing is not None and existing.running:
                 return False
-            job = Job(account=account, action=action)
+            job = Job(account=account, action=action, asked_rounds=rounds)
             self.jobs[account] = job
 
         job.thread = threading.Thread(

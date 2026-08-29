@@ -22,6 +22,8 @@ from datetime import datetime
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from urllib.parse import parse_qs, quote, unquote
 
+from .proxy import GameProxy, prefix_for
+
 logger = logging.getLogger(__name__)
 
 WAITING = "<p>Ожидание первой страницы…"
@@ -481,6 +483,7 @@ class LiveServer:
         # a dead end changes the count but not the screen — so it needs its
         # own nudge or the table would sit still between pages.
         controller.on_progress = self.refresh
+        self.proxy = GameProxy(controller.base_url, controller.play_session)
         for name in controller.names():
             self.channel(name)
 
@@ -507,6 +510,9 @@ class LiveServer:
         """
         self.port = port
         self.controller = controller
+        # Built by attach(), which is where the accounts and their sessions
+        # become known.
+        self.proxy: GameProxy | None = None
         self.channels: dict[str, Channel] = {}
         self._subscribers: dict[str | None, list[queue.Queue[str]]] = {}
         self._lock = threading.Lock()
@@ -629,6 +635,8 @@ class LiveServer:
                 elif len(parts) == 2 and parts[0] == "stop":
                     ok = server.controller.stop(parts[1])
                     self._send("<p>Останавливаю" if ok else "<p>Нечего останавливать")
+                elif parts and parts[0] == "play":
+                    self._play_through(parts)
                 elif len(parts) == 3 and parts[0] == "run":
                     wanted = parse_qs(query).get("rounds", [""])[0]
                     rounds = int(wanted) if wanted.isdigit() and int(wanted) > 0 else None
@@ -665,8 +673,44 @@ class LiveServer:
                 elif parts[0] == "watch" and len(parts) == 3 and parts[2] == "events":
                     channel = server.channels.get(parts[1])
                     self._stream(parts[1], str(channel.pages) if channel else "0")
+                elif parts[0] == "play" and len(parts) >= 2:
+                    self._play_through(parts)
                 else:
                     self._send("<p>Нет такой страницы", status=404)
+
+            def _play_through(self, parts):
+                """Serve one game page through the panel, as this account.
+
+                The browser never talks to the game's own address, so its
+                cookies for the site — which is what made a handed-over link
+                open the wrong profile — cannot get in the way.
+                """
+                if server.proxy is None or len(parts) < 2:
+                    self._send("<p>Игра сейчас недоступна", status=503)
+                    return
+
+                account = parts[1]
+                rest = "/".join(parts[2:])
+                _, _, query = self.path.partition("?")
+                if query:
+                    rest = f"{rest}?{query}"
+
+                body = None
+                if self.command == "POST":
+                    length = int(self.headers.get("Content-Length") or 0)
+                    body = self.rfile.read(length)
+
+                status, headers, payload = server.proxy.fetch(
+                    account, rest, method=self.command, body=body,
+                    content_type=self.headers.get("Content-Type"),
+                )
+
+                self.send_response(status)
+                for name, value in headers.items():
+                    self.send_header(name, value)
+                self.send_header("Content-Length", str(len(payload)))
+                self.end_headers()
+                self.wfile.write(payload)
 
             def _add(self):
                 """Take a new account from the panel's form."""
@@ -696,19 +740,18 @@ class LiveServer:
                 self._send(problem or "сохранено", status=400 if problem else 200)
 
             def _open_game(self, account: str):
-                """Hand this profile to an ordinary browser tab.
+                """Open this profile for playing by hand.
 
                 Signing in can take a while at a human pace, so this answers
-                only once there is a link to answer with.
+                only once there is a session to answer with.
                 """
-                result = server.controller.game_url(account)
-                ok = result.startswith("http")
-                logger.info(
-                    "Panel: handing %s to a browser: %s",
-                    account,
-                    "ok" if ok else result,
-                )
-                self._send(result, status=200 if ok else 400)
+                session = server.controller.play_session(account)
+                if isinstance(session, str):
+                    logger.info("Panel: could not open %s: %s", account, session)
+                    self._send(session, status=400)
+                    return
+                logger.info("Panel: %s opened for playing by hand", account)
+                self._send(prefix_for(account) + "home")
 
             def _settings(self, account: str):
                 """Save the settings form for one account."""
