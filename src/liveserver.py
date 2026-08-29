@@ -115,8 +115,7 @@ _OVERVIEW = """<!doctype html><meta charset="utf-8"><title>Боты играют
    if (everyone === 'stop') return void post('stop-all');
    if (everyone) {
      document.querySelectorAll('tr[data-name]').forEach(function (row) {
-       post('run/' + encodeURIComponent(row.dataset.name) + '/' + everyone +
-            '?rounds=' + roundsOf(row));
+       post('run/' + encodeURIComponent(row.dataset.name) + '/' + everyone);
      });
      return;
    }
@@ -137,13 +136,10 @@ _OVERVIEW = """<!doctype html><meta charset="utf-8"><title>Боты играют
      return void post('remove/' + name).then(function (r) { return r.text(); })
        .then(function (text) { if (text !== 'удалён') alert(text); });
    }
-   post('run/' + name + '/' + what + '?rounds=' + roundsOf(row));
+   // No round count rides along: it is saved, and the run re-reads it before
+   // every attempt, so changing it mid-run changes the run.
+   post('run/' + name + '/' + what);
  });
-
- function roundsOf(row) {
-   var field = row.querySelector('input[type=number]');
-   return field ? field.value : '';
- }
 
  document.addEventListener('input', function (event) {
    var field = event.target;
@@ -379,7 +375,8 @@ _OVERVIEW = """<!doctype html><meta charset="utf-8"><title>Боты играют
 _WATCH = """<!doctype html><meta charset="utf-8"><title>NAME</title>
 <style>STYLE</style>
 <header><span class="dot" id="dot"></span><a href="/">← все профили</a>
-<b>NAME</b><span id="count">страниц: 0</span><span id="when"></span></header>
+<b>NAME</b><span id="count">страниц: 0</span><span id="when"></span>
+<button class="go" id="open" title="Открыть этот профиль в обычной вкладке, чтобы играть самому">Войти в игру</button></header>
 <div class="stage">
  <iframe id="a" class="shown" src="/watch/ENCNAME/page"></iframe>
  <iframe id="b"></iframe>
@@ -410,6 +407,26 @@ _WATCH = """<!doctype html><meta charset="utf-8"><title>NAME</title>
    when.textContent = new Date().toLocaleTimeString();
  };
  events.onerror = function () { dot.className = 'dot gone'; };
+
+ // Hands this profile to a real browser tab. The window is opened on the
+ // click itself — opening it later, once the answer arrives, is what a popup
+ // blocker stops.
+ var opener = document.getElementById('open');
+ opener.addEventListener('click', function () {
+   var tab = window.open('', '_blank');
+   var label = opener.textContent;
+   opener.disabled = true;
+   opener.textContent = 'вхожу…';
+   fetch('/open/ENCNAME', {method: 'POST'}).then(function (response) {
+     return response.text();
+   }).then(function (text) {
+     opener.disabled = false;
+     opener.textContent = label;
+     if (text.indexOf('http') === 0) { tab.location = text; return; }
+     if (tab) tab.close();
+     alert(text);
+   });
+ });
 </script>
 """
 
@@ -460,6 +477,10 @@ class LiveServer:
     def attach(self, controller) -> None:
         """Give the dashboard something to drive."""
         self.controller = controller
+        # Progress moves without a new page arriving — an attempt that ends in
+        # a dead end changes the count but not the screen — so it needs its
+        # own nudge or the table would sit still between pages.
+        controller.on_progress = self.refresh
         for name in controller.names():
             self.channel(name)
 
@@ -600,6 +621,8 @@ class LiveServer:
                     self._settings(parts[1])
                 elif len(parts) == 2 and parts[0] == "rounds":
                     self._rounds(parts[1], parse_qs(query).get("rounds", [""])[0])
+                elif len(parts) == 2 and parts[0] == "open":
+                    self._open_game(parts[1])
                 elif parts == ["stop-all"]:
                     stopped = server.controller.stop_all()
                     self._send(f"<p>Остановлено: {stopped}")
@@ -671,6 +694,21 @@ class LiveServer:
                     return
                 problem = server.controller.update_account(account, {"maze_rounds": wanted})
                 self._send(problem or "сохранено", status=400 if problem else 200)
+
+            def _open_game(self, account: str):
+                """Hand this profile to an ordinary browser tab.
+
+                Signing in can take a while at a human pace, so this answers
+                only once there is a link to answer with.
+                """
+                result = server.controller.game_url(account)
+                ok = result.startswith("http")
+                logger.info(
+                    "Panel: handing %s to a browser: %s",
+                    account,
+                    "ok" if ok else result,
+                )
+                self._send(result, status=200 if ok else 400)
 
             def _settings(self, account: str):
                 """Save the settings form for one account."""

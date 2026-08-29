@@ -130,14 +130,22 @@ class NeboBot:
         except requests.RequestException as exc:
             logger.warning("Could not read the task page: %s", exc)
 
-    def stop(self) -> None:
-        """Log out and release the session.
+    def stop(self, logout: bool = True) -> None:
+        """Release the session, logging out first unless asked not to.
 
         Safe to call even if :meth:`start` failed or was never called.
+
+        Args:
+            logout: Whether to end the session on the server. False when the
+                session has been handed to a browser: logging out would drop
+                the player out of the game mid-click.
         """
         logger.info("Stopping bot")
 
-        if not self.auth.logout():
-            logger.warning("Logout did not complete cleanly")
+        if logout:
+            if not self.auth.logout():
+                logger.warning("Logout did not complete cleanly")
+        else:
+            logger.info("Leaving the session open; it was handed to a browser")
 
         self.auth.session.close()

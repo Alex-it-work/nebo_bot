@@ -8,7 +8,7 @@ import time
 import pytest
 
 from src.config import Config
-from src.control import ACTIONS, Controller
+from src.control import ACTIONS, Controller, Job
 
 
 @pytest.fixture
@@ -116,7 +116,7 @@ class _StubBot:
     def start(self):
         return True
 
-    def stop(self):
+    def stop(self, logout=True):
         type(self).stopped += 1
 
     def collect(self):
@@ -147,7 +147,7 @@ class _MazeBot(_StubBot):
         self.maze = self
         self.config = config
 
-    def solve(self, rounds=None, should_stop=None, on_complete=None):
+    def solve(self, rounds=None, should_stop=None, on_complete=None, on_attempt=None):
         type(self).should_stop = should_stop
         return 1
 
@@ -353,7 +353,7 @@ class _PerMazeBot(_StubBot):
         super().__init__(config)
         self.maze = self
 
-    def solve(self, rounds=None, should_stop=None, on_complete=None):
+    def solve(self, rounds=None, should_stop=None, on_complete=None, on_attempt=None):
         for _ in range(3):
             if on_complete:
                 on_complete()
@@ -362,3 +362,79 @@ class _PerMazeBot(_StubBot):
     def collect(self):
         type(self).collected += 1
         return 1
+
+
+class FakeCookie:
+    def __init__(self, name, value):
+        self.name, self.value = name, value
+
+
+class FakeCookieJar(list):
+    pass
+
+
+class TestProgress:
+    """The table said "Пройти лабиринт" for an hour and nothing more."""
+
+    def test_nothing_to_report_before_the_first_attempt(self):
+        assert Job(account="a", action="maze").progress == ""
+
+    def test_reports_how_many_are_done_and_which_attempt(self):
+        job = Job(account="a", action="maze", done=3, target=9, attempt=27)
+        assert job.progress == "3/9, попытка 27"
+
+    def test_an_open_ended_run_shows_no_target(self):
+        job = Job(account="a", action="maze", done=2, target=0, attempt=5)
+        assert job.progress == "2/∞, попытка 5"
+
+    def test_only_the_maze_reports_progress(self):
+        job = Job(account="a", action="collect", done=1, target=2, attempt=3)
+        assert job.progress == ""
+
+    def test_the_status_carries_it(self, controller):
+        controller.jobs["Первый"] = job = Job(
+            account="Первый", action="maze", done=3, target=9, attempt=27
+        )
+        job.thread = threading.Thread(target=lambda: None)
+        job.thread.start()
+        job.thread.join()
+        # A finished job reports its result, not its progress.
+        assert controller.status("Первый") == "готово"
+
+
+class TestHandingOverTheGame:
+    """Opening the real profile from the panel."""
+
+    def test_the_link_carries_the_session_id(self):
+        session = type("S", (), {"cookies": [FakeCookie("JSESSIONID", "ABC123")]})()
+        config = Config(username="u", password="p")
+        url = Controller._url_for(config, session)
+        assert url.endswith("/home;jsessionid=ABC123")
+
+    def test_other_cookies_are_ignored(self):
+        session = type("S", (), {"cookies": [FakeCookie("login", "x"), FakeCookie("id", "y")]})()
+        assert Controller._url_for(Config(username="u", password="p"), session).startswith("не ")
+
+    def test_an_unknown_account_is_refused(self, controller):
+        assert controller.game_url("Никто").startswith("не ")
+
+    def test_a_running_account_hands_over_the_session_it_is_playing(self, controller):
+        session = type("S", (), {"cookies": [FakeCookie("JSESSIONID", "LIVE")]})()
+        bot = type("B", (), {"auth": type("A", (), {"session": session})()})()
+        job = Job(account="Первый", action="maze", bot=bot)
+        job.thread = threading.Thread(target=lambda: time.sleep(0.5), daemon=True)
+        job.thread.start()
+        controller.jobs["Первый"] = job
+        try:
+            assert controller.game_url("Первый").endswith(";jsessionid=LIVE")
+            # Signing in twice risks the game dropping one of the two.
+            assert job.handed_over is True
+        finally:
+            job.thread.join()
+
+    def test_a_handed_over_session_is_not_logged_out(self):
+        # Logging out would drop the player out of the game mid-click.
+        job = Job(account="a", action="maze")
+        assert job.handed_over is False
+        job.handed_over = True
+        assert job.handed_over is True

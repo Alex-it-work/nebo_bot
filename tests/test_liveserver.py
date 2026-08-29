@@ -211,6 +211,10 @@ class FakeController:
         self.added = (username, password)
         return ""
 
+    def game_url(self, account):
+        self.opened = account
+        return f"https://nebo.mobi/home;jsessionid=FOR-{account}"
+
     def stop(self, account):
         self.stopped.append(account)
         return True
@@ -477,3 +481,35 @@ class TestTheFieldIsNotChangedByAccident:
     def test_the_saved_value_is_tracked(self, server):
         page = get("", server)
         assert "saved_rounds[account.name] = account.rounds" in page
+
+
+class TestOpeningTheRealProfile:
+    """Watching is not the same as playing; the panel can hand over the session."""
+
+    def test_the_watch_page_offers_the_button(self, server):
+        server.attach(FakeController())
+        page = get("watch/Первый", server)
+        assert "Войти в игру" in page
+
+    def test_it_answers_with_a_link(self, server):
+        controller = FakeController()
+        server.attach(controller)
+        status, body = post("open/Первый", server)
+        assert status == 200 and body.endswith(";jsessionid=FOR-Первый")
+        assert controller.opened == "Первый"
+
+    def test_a_refusal_comes_back_as_a_message(self, server):
+        controller = FakeController()
+        controller.game_url = lambda account: "не удалось войти в игру"
+        server.attach(controller)
+        with pytest.raises(urllib.error.HTTPError) as raised:
+            post("open/Первый", server)
+        assert raised.value.code == 400
+
+    def test_the_tab_is_opened_on_the_click_not_on_the_answer(self, server):
+        # Opening it once the answer arrives is what a popup blocker stops.
+        server.attach(FakeController())
+        page = get("watch/Первый", server)
+        opened = page.index("window.open")
+        fetched = page.index("fetch('/open/")
+        assert opened < fetched

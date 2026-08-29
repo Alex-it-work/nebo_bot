@@ -180,7 +180,7 @@ class MazeBot:
                 numbered[int(match.group(1))] = url
         return numbered
 
-    def solve(self, rounds: int | None = None, should_stop=None, on_complete=None) -> int:
+    def solve(self, rounds=None, should_stop=None, on_complete=None, on_attempt=None) -> int:
         """Complete whole mazes, prize included.
 
         A dead end restarts from the entrance; so does a win, since "Начать
@@ -189,29 +189,45 @@ class MazeBot:
         Args:
             rounds: How many mazes to complete, or 0 for as many as the keys,
                 attempt limit and session budget allow. Defaults to the
-                configured value.
+                configured value. May be a callable, which is asked again
+                before every attempt, so the target can be raised or lowered
+                while the run is going rather than only for the next one.
             should_stop: Called between attempts; when it returns True the run
                 winds up. Checked between attempts rather than mid-maze, since
                 abandoning a half-walked maze wastes the keys already spent.
             on_complete: Called after each finished maze. Clearing a marathon
                 tier ripens a reward, and until it is taken the next tier does
                 not appear — so further mazes would count towards nothing.
+            on_attempt: Called with (attempt, completed, target) as each
+                attempt begins, so progress can be shown while it runs
+                instead of only in the log.
 
         Returns:
             The number of mazes completed.
         """
         target = self.config.maze_target_level
-        rounds = self.config.maze_rounds if rounds is None else rounds
+        if rounds is None:
+            rounds = self.config.maze_rounds
+        # A callable target is re-read every attempt; a plain number is fixed.
+        asked = rounds if callable(rounds) else (lambda: rounds)
         max_attempts = self.config.maze_max_attempts
         budget = SessionBudget(self.config.session_max_minutes)
-        wanted = str(rounds) if rounds else "unlimited"
 
-        logger.info("Solving mazes: %s to complete, %d rooms each", wanted, target)
+        logger.info(
+            "Solving mazes: %s to complete, %d rooms each",
+            str(asked()) if asked() else "unlimited",
+            target,
+        )
 
         completed = 0
         attempt = 0
 
-        while rounds == 0 or completed < rounds:
+        while True:
+            goal = asked()
+            wanted = str(goal) if goal else "unlimited"
+            if goal and completed >= goal:
+                break
+
             if should_stop is not None and should_stop():
                 logger.info("Asked to stop; finishing after %d maze(s)", completed)
                 break
@@ -230,6 +246,8 @@ class MazeBot:
 
             attempt += 1
             logger.info("Attempt #%d (%d/%s done)", attempt, completed, wanted)
+            if on_attempt is not None:
+                on_attempt(attempt, completed, goal)
 
             try:
                 if self._walk(target):

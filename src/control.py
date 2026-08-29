@@ -44,11 +44,28 @@ class Job:
     stopping: threading.Event = field(default_factory=threading.Event)
     finished: bool = False
     result: str = ""
+    # Set once the session has been handed to a browser, so the job leaves it
+    # open instead of logging the player out from under themselves.
+    handed_over: bool = False
+    # Live progress. Without these the table said "Пройти лабиринт" for an
+    # hour and there was no way to tell how much of it was behind you.
+    done: int = 0
+    target: int = 0
+    attempt: int = 0
+    bot: object | None = None
 
     @property
     def running(self) -> bool:
         """Whether the job is still going."""
         return self.thread is not None and self.thread.is_alive()
+
+    @property
+    def progress(self) -> str:
+        """How far along this job is, in a few characters."""
+        if self.action != "maze" or not self.attempt:
+            return ""
+        goal = str(self.target) if self.target else "∞"
+        return f"{self.done}/{goal}, попытка {self.attempt}"
 
 
 class Controller:
@@ -81,6 +98,8 @@ class Controller:
         # two saves landing together would read the same copy and one would be
         # lost, so writes are serialised.
         self._file_lock = threading.RLock()
+        # Set by the dashboard so progress reaches the table as it happens.
+        self.on_progress = lambda: None
 
     def names(self) -> list[str]:
         """Every account this controller knows about, in file order."""
@@ -96,8 +115,56 @@ class Controller:
                 # An attempt takes a while to wind up; without this the table
                 # looks identical to a stop that did nothing.
                 return "останавливаю…"
-            return ACTIONS.get(job.action, job.action)
+            label = ACTIONS.get(job.action, job.action)
+            return f"{label}: {job.progress}" if job.progress else label
         return job.result or "готово"
+
+    def game_url(self, account: str) -> str:
+        """Return a link that opens this profile in an ordinary browser.
+
+        The site keeps the session id in the URL path as well as in a cookie,
+        which is how a browser that has never seen the session can join it.
+        Verified against the live site: a fresh session with no cookies at all
+        opened the authenticated home page from this link alone.
+
+        A running account hands over the session it is already playing on,
+        because signing in twice risks the game dropping one of them. An idle
+        account gets a session of its own, opened for this.
+
+        Returns:
+            The URL, or a message starting with "не " explaining why not.
+        """
+        config = self.configs.get(account)
+        if config is None:
+            return "не найден такой профиль"
+
+        job = self.jobs.get(account)
+        if job is not None and job.running and job.bot is not None:
+            job.handed_over = True
+            return self._url_for(config, job.bot.auth.session)
+
+        try:
+            from .modules.auth import Auth
+
+            auth = Auth(config)
+            if not auth.login():
+                return "не удалось войти в игру"
+        except Exception as exc:  # noqa: BLE001 - report rather than crash the panel
+            logger.exception("%s: could not open the game", account)
+            return f"не получилось: {exc}"
+        return self._url_for(config, auth.session)
+
+    @staticmethod
+    def _url_for(config: Config, session) -> str:
+        """Build the handoff link from a logged-in session."""
+        session_id = next(
+            (c.value for c in session.cookies if c.name.upper() == "JSESSIONID"), None
+        )
+        if not session_id:
+            return "не нашлась сессия игры"
+        # This link is the session. It never leaves 127.0.0.1, and the panel
+        # must not be published as-is.
+        return config.url(f"/home;jsessionid={session_id}")
 
     def rounds_for(self, account: str) -> int:
         """How many mazes this account plays when asked to play."""
@@ -323,13 +390,14 @@ class Controller:
                     return
 
                 bot = NeboBot(config)
+                job.bot = bot
                 try:
                     if not bot.start():
                         job.result = "вход не прошёл"
                         return
                     job.result = self._act(bot, job, rounds)
                 finally:
-                    bot.stop()
+                    bot.stop(logout=not job.handed_over)
         except Exception as exc:  # noqa: BLE001 - a job must never take the app down
             logger.exception("%s: job failed", job.account)
             job.result = f"ошибка: {exc}"
@@ -344,20 +412,34 @@ class Controller:
         if job.action == "collect":
             return f"забрано наград: {bot.collect()}"
 
-        wanted = rounds if rounds is not None else bot.config.maze_rounds
         taken = 0
+
+        def wanted() -> int:
+            # Re-read before every attempt, so changing the number in the
+            # table applies to the run already going rather than only to the
+            # next one. The value passed with the button wins while it lasts.
+            if rounds is not None:
+                return rounds
+            config = self.configs.get(job.account)
+            return config.maze_rounds if config else 0
 
         def collect_what_ripened() -> None:
             # After each maze, not only at the end: a tier cleared mid-run
             # leaves a reward waiting, and until it is taken the next tier does
             # not appear, so the remaining mazes would count towards nothing.
             nonlocal taken
+            job.done += 1
             taken += bot.collect()
+
+        def note_attempt(attempt: int, completed: int, goal: int) -> None:
+            job.attempt, job.done, job.target = attempt, completed, goal
+            self.on_progress()
 
         done = bot.maze.solve(
             rounds=wanted,
             should_stop=job.stopping.is_set,
             on_complete=collect_what_ripened,
+            on_attempt=note_attempt,
         )
 
         outcome = f"лабиринтов: {done}" + (f", наград: {taken}" if taken else "")
